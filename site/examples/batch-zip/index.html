@@ -44,9 +44,9 @@
   };
 
   // start with the bundled samples
-  const samples = await Promise.all(['dusk', 'still-life', 'potion'].map(async id => {
-    const img = new Image(); img.src = `../../assets/samples/${id}.svg`; await img.decode();
-    return { name: `${id}.svg`, source: img };
+  const samples = await Promise.all([['mountain-fjord', '../../assets/photos/mountain-fjord.jpg'], ['lake-reflection', '../../assets/photos/lake-reflection.jpg'], ['forest-waterfall', '../../assets/photos/forest-waterfall.jpg']].map(async ([id, url]) => {
+    const img = new Image(); img.src = url; await img.decode();
+    return { name: `${id}.jpg`, source: img };
   }));
   load(samples);
 </script>

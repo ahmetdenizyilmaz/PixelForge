@@ -79,8 +79,9 @@ copy(join(ROOT, 'lib/editor/styles/fonts'), join(OUT, 'assets/fonts'));
 for (const f of readdirSync(join(SITE, 'assets'))) {
   if (/\.(svg|png|ico|webmanifest|jpg)$/.test(f)) copy(join(SITE, 'assets', f), join(OUT, 'assets', f));
 }
+if (existsSync(join(SITE, 'assets/photos'))) copy(join(SITE, 'assets/photos'), join(OUT, 'assets/photos'));
 const { SAMPLES } = await import('../lib/editor/samples.js');
-for (const smp of SAMPLES) write(`assets/samples/${smp.id}.svg`, smp.svg);
+for (const smp of SAMPLES) if (smp.svg) write(`assets/samples/${smp.id}.svg`, smp.svg);
 if (!existsSync(join(ROOT, 'dist/pixelforge.js'))) throw new Error('dist/ is missing: run `npm run build` first');
 mkdirSync(join(OUT, 'lib'), { recursive: true });
 for (const f of readdirSync(join(ROOT, 'dist'))) if (/\.(js|css|cjs)$/.test(f)) copy(join(ROOT, 'dist', f), join(OUT, 'lib', f));
@@ -155,7 +156,7 @@ for (const ex of examples) {
   }
 }
 const cards = examples.map(ex => `<a class="ex-card" href="${ex.slug}/">
-  <canvas class="ex-thumb" width="160" height="120" data-preset='${esc(JSON.stringify(ex.preview || {}))}' data-sample="${esc(ex.sample || 'dusk')}" aria-hidden="true"></canvas>
+  <canvas class="ex-thumb" width="160" height="120" data-preset='${esc(JSON.stringify(ex.preview || {}))}' data-sample="${esc(ex.sample || 'mountain-fjord')}" aria-hidden="true"></canvas>
   <span class="t">${esc(ex.title)}</span><span class="d">${esc(ex.description)}</span>
   <span class="tags">${(ex.tags || []).map(t => `<span>${esc(t)}</span>`).join('')}</span>
 </a>`).join('\n');

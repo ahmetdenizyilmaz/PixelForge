@@ -18,7 +18,7 @@
 
   const px = await createPixelator();          // WebGL 2 through ShaderMate, CPU if unavailable
   let image = new Image();
-  image.src = '../../assets/samples/dusk.svg';
+  image.src = '../../assets/photos/mountain-fjord.jpg';
   await image.decode();
   let result;
 
@@ -29,7 +29,7 @@
       dither: { method: $('method').value, strength: 0.8 },
     });
     result.toCanvas(1, { canvas: $('out') });     // CSS scales it up with image-rendering: pixelated
-    $('info').textContent = `${result.width} × ${result.height}, ${result.usedColors().length} colours, ${result.ms.toFixed(1)} ms on ${result.backend}`;
+    $('info').textContent = `${result.width} Ã— ${result.height}, ${result.usedColors().length} colours, ${result.ms.toFixed(1)} ms on ${result.backend}`;
   }
 
   $('file').onchange = async e => { image = await createImageBitmap(e.target.files[0]); update(); };

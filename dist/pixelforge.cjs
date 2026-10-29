@@ -219,6 +219,7 @@ __export(index_exports, {
   ASPECTS: () => ASPECTS,
   DEFAULTS: () => DEFAULTS,
   DITHER_METHODS: () => DITHER_METHODS,
+  FX_MODES: () => FX_MODES,
   KERNELS: () => KERNELS,
   LEGACY_DITHER: () => LEGACY_DITHER,
   MAX_SIZE: () => MAX_SIZE,
@@ -360,16 +361,26 @@ var LEGACY_DITHER = {
   "4x4 bayer": "bayer4",
   "clustered 4x4": "cluster4"
 };
+var FX_MODES = [
+  { id: "none", label: "None (Pure Pixel)" },
+  { id: "bloom", label: "Bioluminescent Bloom" },
+  { id: "crt", label: "CRT Arcade Phosphor" },
+  { id: "voxel", label: "3D Voxel Bevel" },
+  { id: "lcd", label: "Handheld LCD Grid" },
+  { id: "oscilloscope", label: "Oscilloscope Vector" },
+  { id: "blueprint", label: "Cyber Blueprint" }
+];
 var DEFAULTS = Object.freeze({
   version: SETTINGS_VERSION,
-  size: { mode: "width", width: 112, height: 0, block: 8, resample: "hybrid" },
-  adjust: { brightness: 0, contrast: 0, saturation: 0, hue: 0, gamma: 1, kuwahara: 0 },
+  size: { mode: "width", width: 128, height: 0, block: 8, resample: "hybrid" },
+  adjust: { brightness: 0, contrast: 0, saturation: 0, hue: 0, gamma: 1, kuwahara: 0, clahe: 0 },
   frame: { aspect: "original", zoom: 1, x: 0.5, y: 0.5 },
-  palette: { source: "builtin", id: "endesga-32", name: "Endesga 32", colors: [], count: 16, distance: "oklab" },
+  palette: { source: "builtin", id: "endesga-32", name: "Endesga 32", colors: [], count: 24, distance: "oklab" },
   dither: { method: "bayer4", strength: 0.6, matrix: null },
   alpha: { threshold: 0.5 },
   cleanup: { orphans: false, smooth: false },
   outline: { mode: "none", color: "#000000", corners: false },
+  fx: { mode: "none", strength: 0.65, scanlines: 0, aberration: 0 },
   export: { size: "scale", scale: 4, indexed: true, grid: false, gridColor: "#000000" }
 });
 var clamp = (v, lo, hi, d) => {
@@ -407,7 +418,8 @@ function normalizeSettings(input = {}) {
     saturation: clamp(adj.saturation, -1, 1, 0),
     hue: clamp(adj.hue, -180, 180, 0),
     gamma: clamp(adj.gamma, 0.2, 5, 1),
-    kuwahara: Math.round(clamp(adj.kuwahara, 0, 4, 0))
+    kuwahara: Math.round(clamp(adj.kuwahara, 0, 4, 0)),
+    clahe: clamp(adj.clahe, 0, 1, 0)
   };
   const fr = i.frame || {};
   s.frame = {
@@ -451,6 +463,13 @@ function normalizeSettings(input = {}) {
     mode: oneOf(ol.mode, ["none", "outer", "inner", "ink"], "none"),
     color: isColor(ol.color) ? normHex(ol.color) : d.outline.color,
     corners: bool(ol.corners, false)
+  };
+  const fx = i.fx || {};
+  s.fx = {
+    mode: oneOf(fx.mode, FX_MODES.map((m) => m.id), d.fx.mode),
+    strength: clamp(fx.strength, 0, 1, d.fx.strength),
+    scanlines: clamp(fx.scanlines, 0, 1, d.fx.scanlines),
+    aberration: clamp(fx.aberration, 0, 3, d.fx.aberration)
   };
   s.export = {
     size: oneOf(ex.size, ["scale", "source"], "scale"),
@@ -971,6 +990,40 @@ function alphaCut(buf, threshold) {
   for (let o = 3; o < buf.length; o += 4) buf[o] = buf[o] >= threshold && buf[o] > 0 ? 1 : 0;
   return buf;
 }
+function localContrast(buf, w, h, amount = 0) {
+  if (!(amount > 1e-3)) return buf;
+  const src = buf.slice();
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4;
+      if (src[o + 3] < 0.5) continue;
+      let sumL = 0, sumL2 = 0, cnt = 0;
+      for (let dy = -2; dy <= 2; dy++) {
+        const yy = Math.max(0, Math.min(h - 1, y + dy));
+        for (let dx = -2; dx <= 2; dx++) {
+          const xx = Math.max(0, Math.min(w - 1, x + dx));
+          const qo = (yy * w + xx) * 4;
+          if (src[qo + 3] < 0.5) continue;
+          const l = 0.299 * src[qo] + 0.587 * src[qo + 1] + 0.114 * src[qo + 2];
+          sumL += l;
+          sumL2 += l * l;
+          cnt++;
+        }
+      }
+      if (cnt < 2) continue;
+      const meanL = sumL / cnt;
+      const stdL = Math.sqrt(Math.max(0, sumL2 / cnt - meanL * meanL));
+      const L = 0.299 * src[o] + 0.587 * src[o + 1] + 0.114 * src[o + 2];
+      const gain = Math.min(2.6, 1 + amount * (1.35 / (0.18 + stdL)));
+      const boosted = clamp01(meanL + (L - meanL) * gain);
+      const delta = boosted - L;
+      buf[o] = clamp01(src[o] + delta);
+      buf[o + 1] = clamp01(src[o + 1] + delta);
+      buf[o + 2] = clamp01(src[o + 2] + delta);
+    }
+  }
+  return buf;
+}
 var clamp01 = (v) => v < 0 ? 0 : v > 1 ? 1 : v;
 function paletteSpace(palette, distance) {
   const n = palette.length;
@@ -1167,6 +1220,135 @@ function outline(px, w, h, { mode, color, corners }) {
   }
   return px;
 }
+function postFX(px, w, h, fx = {}) {
+  const mode = fx.mode || "none";
+  const str = fx.strength ?? 0.65;
+  const scan = fx.scanlines ?? 0;
+  const ab = fx.aberration ?? 0;
+  if (mode === "none" && scan <= 1e-3 && ab <= 1e-3) return px;
+  const src = px.slice();
+  const sample = (x, y) => {
+    const xx = Math.max(0, Math.min(w - 1, x)), yy = Math.max(0, Math.min(h - 1, y));
+    const o = (yy * w + xx) * 4;
+    return [src[o] / 255, src[o + 1] / 255, src[o + 2] / 255, src[o + 3] / 255];
+  };
+  const luma3 = (c) => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
+  const mix1 = (a, b, t) => a + (b - a) * t;
+  const clampRange = (v, lo, hi) => v < lo ? lo : v > hi ? hi : v;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const o = (y * w + x) * 4;
+      if (src[o + 3] < 128) continue;
+      let r = src[o] / 255, g = src[o + 1] / 255, b = src[o + 2] / 255;
+      if (ab > 1e-3) {
+        const s0 = Math.floor(ab), s1 = s0 + 1, f = ab - s0;
+        r = mix1(sample(x - s0, y)[0], sample(x - s1, y)[0], f);
+        b = mix1(sample(x + s0, y)[2], sample(x + s1, y)[2], f);
+      }
+      if (mode === "bloom") {
+        let gr = 0, gg = 0, gb = 0, wSum = 0;
+        for (let dy = -2; dy <= 2; dy++) {
+          for (let dx = -2; dx <= 2; dx++) {
+            const wt = 1 / (1 + dx * dx + dy * dy);
+            const sc = sample(x + dx, y + dy);
+            const peak = Math.max(sc[0], sc[1], sc[2]);
+            const br = Math.max(0, peak - 0.42) / 0.58;
+            gr += sc[0] * br * wt;
+            gg += sc[1] * br * wt;
+            gb += sc[2] * br * wt;
+            wSum += wt;
+          }
+        }
+        wSum = Math.max(1, wSum);
+        gr /= wSum;
+        gg /= wSum;
+        gb /= wSum;
+        const lm = 0.299 * r + 0.587 * g + 0.114 * b;
+        const lift = (1 - lm) * str;
+        r = clamp01(r + gr * 1.45 * str + 0.025 * lift);
+        g = clamp01(g + gg * 1.45 * str + 0.02 * lift);
+        b = clamp01(b + gb * 1.45 * str + 0.075 * lift);
+      } else if (mode === "crt") {
+        const lN = sample(x - 1, y), rN = sample(x + 1, y);
+        const bt = 0.45 * str;
+        r = mix1(r, 0.18 * lN[0] + 0.64 * r + 0.18 * rN[0], bt);
+        g = mix1(g, 0.18 * lN[1] + 0.64 * g + 0.18 * rN[1], bt);
+        b = mix1(b, 0.18 * lN[2] + 0.64 * b + 0.18 * rN[2], bt);
+        const sub = x % 3;
+        const mask = sub === 0 ? [1.07, 0.96, 0.96] : sub === 1 ? [0.96, 1.07, 0.96] : [0.96, 0.96, 1.08];
+        r *= mix1(1, mask[0], str);
+        g *= mix1(1, mask[1], str);
+        b *= mix1(1, mask[2], str);
+        if (y % 2 === 1) {
+          const k2 = 1 - 0.22 * str;
+          r *= k2;
+          g *= k2;
+          b *= k2;
+        }
+        const ux = (x + 0.5) / Math.max(1, w) * 2 - 1, uy = (y + 0.5) / Math.max(1, h) * 2 - 1;
+        const vig = clampRange(1 - 0.24 * str * (ux * ux + uy * uy), 0.55, 1) * (1 + 0.12 * str);
+        r = clamp01(r * vig);
+        g = clamp01(g * vig);
+        b = clamp01(b * vig);
+      } else if (mode === "voxel") {
+        const lC = 0.299 * r + 0.587 * g + 0.114 * b;
+        const lTL = 0.5 * (luma3(sample(x - 1, y)) + luma3(sample(x, y - 1)));
+        const lBR = 0.5 * (luma3(sample(x + 1, y)) + luma3(sample(x, y + 1)));
+        const bevel = clampRange((lC - lTL) * 1.4, -0.25, 0.28) - clampRange((lC - lBR) * 1.2, -0.22, 0.25);
+        const facet = (x + y) % 2 === 0 ? 0.032 : -0.032;
+        const d = (bevel + facet) * str;
+        r = clamp01(r + d);
+        g = clamp01(g + d);
+        b = clamp01(b + d);
+      } else if (mode === "lcd") {
+        const ghost = (1 - luma3(sample(x - 1, y - 1))) * 0.12 * str;
+        const cell = x % 2 === 0 && y % 2 === 0 ? 1.04 : 0.94;
+        const cf = 1 + (cell - 1) * str;
+        r = clamp01(r * cf - ghost + 0.76 * 0.04 * str);
+        g = clamp01(g * cf - ghost + 0.82 * 0.04 * str);
+        b = clamp01(b * cf - ghost + 0.62 * 0.04 * str);
+      } else if (mode === "oscilloscope") {
+        const lL = luma3(sample(x - 1, y)), lR = luma3(sample(x + 1, y));
+        const lU = luma3(sample(x, y - 1)), lD = luma3(sample(x, y + 1));
+        const edge = clamp01(Math.sqrt((lR - lL) * (lR - lL) + (lD - lU) * (lD - lU)) * 2.4);
+        const lm = 0.299 * r + 0.587 * g + 0.114 * b;
+        const grid = x % 16 === 0 || y % 16 === 0 ? 0.11 : x % 4 === 0 && y % 4 === 0 ? 0.06 : 0;
+        const beam = clamp01(edge * 0.85 + Math.pow(lm, 1.35) * 0.55);
+        const core = Math.pow(beam, 3) * 0.65;
+        const or = clamp01(0.015 + 0.05 * grid + 0.08 * beam + 0.45 * core);
+        const og = clamp01(0.055 + 0.32 * grid + 0.96 * beam + 1 * core);
+        const ob = clamp01(0.035 + 0.16 * grid + 0.46 * beam + 0.78 * core);
+        r = clamp01(mix1(r, or, str));
+        g = clamp01(mix1(g, og, str));
+        b = clamp01(mix1(b, ob, str));
+      } else if (mode === "blueprint") {
+        const lL = luma3(sample(x - 1, y)), lR = luma3(sample(x + 1, y));
+        const lU = luma3(sample(x, y - 1)), lD = luma3(sample(x, y + 1));
+        const edge = clamp01(Math.sqrt((lR - lL) * (lR - lL) + (lD - lU) * (lD - lU)) * 2.5);
+        const lm = 0.299 * r + 0.587 * g + 0.114 * b;
+        const majorG = x % 24 === 0 || y % 24 === 0 ? 0.16 : x % 8 === 0 || y % 8 === 0 ? 0.065 : 0;
+        const wash = lm * 0.55 + majorG;
+        const core = Math.pow(edge, 2.5) * 0.6;
+        const br = clamp01(0.035 + 0.1 * wash + 0.36 * edge + 0.92 * core);
+        const bg = clamp01(0.11 + 0.3 * wash + 0.84 * edge + 0.98 * core);
+        const bb = clamp01(0.24 + 0.54 * wash + 1 * edge + 1 * core);
+        r = clamp01(mix1(r, br, str));
+        g = clamp01(mix1(g, bg, str));
+        b = clamp01(mix1(b, bb, str));
+      }
+      if (scan > 1e-3 && y % 2 === 1) {
+        const k2 = 1 - 0.28 * scan;
+        r *= k2;
+        g *= k2;
+        b *= k2;
+      }
+      px[o] = Math.round(clamp01(r) * 255);
+      px[o + 1] = Math.round(clamp01(g) * 255);
+      px[o + 2] = Math.round(clamp01(b) * 255);
+    }
+  }
+  return px;
+}
 
 // lib/core/plan.js
 function makePlan(settings, src) {
@@ -1209,6 +1391,7 @@ function extractFrom(src, s, width, height, crop) {
   const w = Math.max(1, Math.round(width * k2)), h = Math.max(1, Math.round(height * k2));
   const prep = resample(src, w, h, s.size.resample || "hybrid", crop, s.adjust.kuwahara || 0);
   adjust(prep, s.adjust);
+  if (s.adjust.clahe > 1e-3) localContrast(prep, w, h, s.adjust.clahe);
   const bytes = new Uint8ClampedArray(prep.length);
   for (let i = 0; i < prep.length; i++) bytes[i] = Math.round(prep[i] * 255);
   return extractPalette({ data: bytes, width: w, height: h }, s.palette.count, { alphaThreshold: Math.max(0.01, s.alpha.threshold) });
@@ -1220,10 +1403,12 @@ function runCPU(plan, src) {
   const buf = resample(src, w, h, s.size.resample, plan.crop, s.adjust.kuwahara || 0);
   adjust(buf, s.adjust);
   alphaCut(buf, s.alpha.threshold);
+  if (s.adjust.clahe > 1e-3) localContrast(buf, w, h, s.adjust.clahe);
   const px = plan.kind === "diffusion" ? quantizeDiffusion(buf, w, h, plan) : quantizeOrdered(buf, w, h, plan);
   if (s.cleanup.orphans) removeOrphans(px, w, h);
   if (s.cleanup.smooth) smoothMajority(px, w, h);
   outline(px, w, h, plan.outline);
+  if (s.fx) postFX(px, w, h, s.fx);
   return px;
 }
 
@@ -1412,9 +1597,40 @@ void main() {
         (0.213 - 0.213 * k - 0.787 * q) * c.r + (0.715 - 0.715 * k + 0.715 * q) * c.g + (0.072 + 0.928 * k + 0.072 * q) * c.b);
     }
     c = pow(clamp(c, 0.0, 1.0), vec3(1.0 / ga));
+  } else {
+    c = clamp(c, 0.0, 1.0);
   }
   a = (a >= u_alphaCut && a > 0.0) ? 1.0 : 0.0;
   fragColor = vec4(c * a, a);
+}
+`
+);
+var CLAHE = (
+  /* glsl */
+  `
+uniform float u_clahe;
+void main() {
+  ivec2 P = topDown();
+  vec4 me = at(iChannel0, P);
+  if (u_clahe <= 0.001 || me.a < 0.5) { fragColor = me; return; }
+  ivec2 R = ivec2(u_resolution);
+  float sumL = 0.0, sumL2 = 0.0, cnt = 0.0;
+  for (int dy = -2; dy <= 2; dy++) {
+    for (int dx = -2; dx <= 2; dx++) {
+      ivec2 Q = clamp(P + ivec2(dx, dy), ivec2(0), R - 1);
+      vec4 s = at(iChannel0, Q);
+      if (s.a < 0.5) continue;
+      float l = luma(s.rgb);
+      sumL += l; sumL2 += l * l; cnt += 1.0;
+    }
+  }
+  if (cnt < 2.0) { fragColor = me; return; }
+  float meanL = sumL / cnt;
+  float stdL = sqrt(max(0.0, (sumL2 / cnt) - meanL * meanL));
+  float L = luma(me.rgb);
+  float gain = min(2.6, 1.0 + u_clahe * (1.35 / (0.18 + stdL)));
+  float boosted = clamp(meanL + (L - meanL) * gain, 0.0, 1.0);
+  fragColor = vec4(clamp(me.rgb + (boosted - L), 0.0, 1.0), me.a);
 }
 `
 );
@@ -1579,6 +1795,102 @@ void main() {
 }
 `
 );
+var POSTFX = (
+  /* glsl */
+  `
+uniform int u_fxMode;
+uniform vec3 u_fxParams; // x=strength, y=scanlines, z=aberration
+
+void main() {
+  ivec2 P = topDown();
+  ivec2 R = ivec2(u_resolution);
+  vec4 me = at(iChannel0, P);
+  float str = u_fxParams.x, scan = u_fxParams.y, ab = u_fxParams.z;
+  if ((u_fxMode == 0 && scan <= 0.001 && ab <= 0.001) || me.a < 0.5) {
+    fragColor = me;
+    return;
+  }
+
+  vec3 c = me.rgb;
+  if (ab > 0.001) {
+    int s0 = int(floor(ab));
+    int s1 = s0 + 1;
+    float f = ab - float(s0);
+    float rL = mix(at(iChannel0, P - ivec2(s0, 0)).r, at(iChannel0, P - ivec2(s1, 0)).r, f);
+    float bR = mix(at(iChannel0, P + ivec2(s0, 0)).b, at(iChannel0, P + ivec2(s1, 0)).b, f);
+    c = vec3(rL, c.g, bR);
+  }
+
+  if (u_fxMode == 1) {
+    vec3 glow = vec3(0.0);
+    float wSum = 0.0;
+    for (int dy = -2; dy <= 2; dy++) {
+      for (int dx = -2; dx <= 2; dx++) {
+        float w = 1.0 / (1.0 + float(dx * dx + dy * dy));
+        vec3 sc = at(iChannel0, P + ivec2(dx, dy)).rgb;
+        float peak = max(sc.r, max(sc.g, sc.b));
+        float br = max(0.0, peak - 0.42) / 0.58;
+        glow += sc * (br * w);
+        wSum += w;
+      }
+    }
+    glow /= max(1.0, wSum);
+    float lm = luma(c);
+    vec3 shadowLift = vec3(0.025, 0.02, 0.075) * (1.0 - lm) * str;
+    c = clamp(c + glow * (1.45 * str) + shadowLift, 0.0, 1.0);
+  } else if (u_fxMode == 2) {
+    vec3 lN = at(iChannel0, P - ivec2(1, 0)).rgb;
+    vec3 rN = at(iChannel0, P + ivec2(1, 0)).rgb;
+    c = mix(c, 0.18 * lN + 0.64 * c + 0.18 * rN, 0.45 * str);
+    int sub = P.x % 3;
+    vec3 mask = sub == 0 ? vec3(1.07, 0.96, 0.96) : (sub == 1 ? vec3(0.96, 1.07, 0.96) : vec3(0.96, 0.96, 1.08));
+    c *= mix(vec3(1.0), mask, str);
+    if ((P.y % 2) == 1) c *= (1.0 - 0.22 * str);
+    vec2 resF = vec2(max(1.0, float(R.x)), max(1.0, float(R.y)));
+    vec2 uv = ((vec2(P) + 0.5) / resF) * 2.0 - 1.0;
+    float vig = clamp(1.0 - 0.24 * str * dot(uv, uv), 0.55, 1.0);
+    c = clamp(c * (1.0 + 0.12 * str) * vig, 0.0, 1.0);
+  } else if (u_fxMode == 3) {
+    float lC = luma(c);
+    float lTL = 0.5 * (luma(at(iChannel0, P + ivec2(-1, 0)).rgb) + luma(at(iChannel0, P + ivec2(0, -1)).rgb));
+    float lBR = 0.5 * (luma(at(iChannel0, P + ivec2(1, 0)).rgb) + luma(at(iChannel0, P + ivec2(0, 1)).rgb));
+    float bevel = clamp((lC - lTL) * 1.4, -0.25, 0.28) - clamp((lC - lBR) * 1.2, -0.22, 0.25);
+    float facet = (((P.x + P.y) % 2) == 0 ? 0.032 : -0.032);
+    c = clamp(c + (bevel + facet) * str, 0.0, 1.0);
+  } else if (u_fxMode == 4) {
+    vec3 prev = at(iChannel0, P - ivec2(1, 1)).rgb;
+    float ghost = (1.0 - luma(prev)) * 0.12 * str;
+    float cell = (((P.x % 2) == 0 && (P.y % 2) == 0) ? 1.04 : 0.94);
+    vec3 paper = vec3(0.76, 0.82, 0.62);
+    c = clamp(c * (1.0 + (cell - 1.0) * str) - ghost + paper * (0.04 * str), 0.0, 1.0);
+  } else if (u_fxMode == 5) {
+    float lL = luma(at(iChannel0, P + ivec2(-1, 0)).rgb), lR = luma(at(iChannel0, P + ivec2(1, 0)).rgb);
+    float lU = luma(at(iChannel0, P + ivec2(0, -1)).rgb), lD = luma(at(iChannel0, P + ivec2(0, 1)).rgb);
+    float edge = clamp(sqrt((lR - lL) * (lR - lL) + (lD - lU) * (lD - lU)) * 2.4, 0.0, 1.0);
+    float lm = luma(c);
+    float grid = ((P.x % 16) == 0 || (P.y % 16) == 0) ? 0.11 : (((P.x % 4) == 0 && (P.y % 4) == 0) ? 0.06 : 0.0);
+    float beam = clamp(edge * 0.85 + pow(lm, 1.35) * 0.55, 0.0, 1.0);
+    vec3 osc = vec3(0.015, 0.055, 0.035) + vec3(0.05, 0.32, 0.16) * grid
+             + vec3(0.08, 0.96, 0.46) * beam + vec3(0.45, 1.0, 0.78) * pow(beam, 3.0) * 0.65;
+    c = clamp(mix(c, clamp(osc, 0.0, 1.0), str), 0.0, 1.0);
+  } else if (u_fxMode == 6) {
+    float lL = luma(at(iChannel0, P + ivec2(-1, 0)).rgb), lR = luma(at(iChannel0, P + ivec2(1, 0)).rgb);
+    float lU = luma(at(iChannel0, P + ivec2(0, -1)).rgb), lD = luma(at(iChannel0, P + ivec2(0, 1)).rgb);
+    float edge = clamp(sqrt((lR - lL) * (lR - lL) + (lD - lU) * (lD - lU)) * 2.5, 0.0, 1.0);
+    float lm = luma(c);
+    float majorG = ((P.x % 24) == 0 || (P.y % 24) == 0) ? 0.16 : (((P.x % 8) == 0 || (P.y % 8) == 0) ? 0.065 : 0.0);
+    vec3 bp = vec3(0.035, 0.11, 0.24) + vec3(0.10, 0.30, 0.54) * (lm * 0.55 + majorG)
+            + vec3(0.36, 0.84, 1.0) * edge + vec3(0.92, 0.98, 1.0) * pow(edge, 2.5) * 0.6;
+    c = clamp(mix(c, clamp(bp, 0.0, 1.0), str), 0.0, 1.0);
+  }
+
+  if (scan > 0.001 && (P.y % 2) == 1) {
+    c *= (1.0 - 0.28 * scan);
+  }
+  fragColor = vec4(floor(clamp(c, 0.0, 1.0) * 255.0 + 0.5) / 255.0, 1.0);
+}
+`
+);
 
 // lib/core/gpu/backend.js
 var canvasOf = (w, h) => {
@@ -1589,6 +1901,7 @@ var canvasOf = (w, h) => {
 };
 var RESAMPLE_ID = { box: 0, nearest: 1, sobel: 2, hybrid: 3 };
 var OUTLINE_ID = { none: 0, outer: 1, inner: 2, ink: 3 };
+var FX_ID = { none: 0, bloom: 1, crt: 2, voxel: 3, lcd: 4, oscilloscope: 5, blueprint: 6 };
 async function createGPUBackend() {
   if (typeof document === "undefined") throw new Error("No DOM");
   const probe = canvasOf(1, 1).getContext("webgl2");
@@ -1623,6 +1936,7 @@ async function createGPUBackend() {
       u_distance: 0,
       u_resample: 3,
       u_kuwahara: 0,
+      u_clahe: 0,
       u_adjust: [0, 0, 0, 1],
       u_hue: 0,
       u_crop: [0, 0, 1, 1],
@@ -1636,16 +1950,20 @@ async function createGPUBackend() {
       u_kernel: new Float32Array(MAX_KERNEL * 3),
       u_outline: 0,
       u_corners: 0,
-      u_outlineColor: [0, 0, 0]
+      u_outlineColor: [0, 0, 0],
+      u_fxMode: 0,
+      u_fxParams: [0.65, 0, 0]
     },
     passes: [
       { name: "prep", shader: PREP, float: "full", filter: "nearest", channels: [{ ...nearest2(source), dynamic: false }] },
-      { name: "quant", shader: QUANT, filter: "nearest", channels: ["prep"] },
-      { name: "diffuse", shader: DIFFUSE, float: "full", filter: "nearest", pingpong: true, iterations: 2, channels: ["prep", "diffuse"] },
+      { name: "clahe", shader: CLAHE, float: "full", filter: "nearest", channels: ["prep"] },
+      { name: "quant", shader: QUANT, filter: "nearest", channels: ["clahe"] },
+      { name: "diffuse", shader: DIFFUSE, float: "full", filter: "nearest", pingpong: true, iterations: 2, channels: ["clahe", "diffuse"] },
       { name: "resolve", shader: RESOLVE, filter: "nearest", channels: ["quant", "diffuse"] },
       { name: "orphan", shader: ORPHAN, filter: "nearest", channels: ["resolve"] },
       { name: "smooth", shader: SMOOTH, filter: "nearest", channels: ["orphan"] },
-      { name: "out", shader: OUTLINE, screen: true, channels: ["smooth"] }
+      { name: "out", shader: OUTLINE, filter: "nearest", channels: ["smooth"] },
+      { name: "postfx", shader: POSTFX, screen: true, channels: ["out"] }
     ]
   });
   let failure = null;
@@ -1701,11 +2019,13 @@ async function createGPUBackend() {
     if (sm.width !== plan.width || sm.height !== plan.height) sm.setSize(plan.width, plan.height);
     const diffusion = plan.kind === "diffusion";
     const kernel = new Array(MAX_KERNEL).fill(null).map((_, i) => plan.kernel && plan.kernel[i] || [0, 0, 0]);
+    const fx = s.fx || { mode: "none", strength: 0.65, scanlines: 0, aberration: 0 };
     sm.set({
       u_count: plan.palette.length || 1,
       u_distance: plan.distance,
       u_resample: RESAMPLE_ID[s.size.resample] ?? 3,
       u_kuwahara: s.adjust.kuwahara | 0,
+      u_clahe: s.adjust.clahe || 0,
       u_adjust: [s.adjust.brightness, s.adjust.contrast, s.adjust.saturation, s.adjust.gamma],
       u_hue: s.adjust.hue,
       u_crop: [plan.crop.x, plan.crop.y, plan.crop.w, plan.crop.h],
@@ -1719,7 +2039,9 @@ async function createGPUBackend() {
       u_kernel: new Float32Array(kernel.flat()),
       u_outline: OUTLINE_ID[plan.outline.mode] ?? 0,
       u_corners: plan.outline.corners ? 1 : 0,
-      u_outlineColor: plan.outline.color.map((v) => v / 255)
+      u_outlineColor: plan.outline.color.map((v) => v / 255),
+      u_fxMode: FX_ID[fx.mode] ?? 0,
+      u_fxParams: [fx.strength ?? 0.65, fx.scanlines ?? 0, fx.aberration ?? 0]
     });
     passUniforms("diffuse", { u_on: diffusion ? 1 : 0 });
     passUniforms("resolve", { u_on: diffusion ? 1 : 0 });
@@ -2206,86 +2528,110 @@ var PRESETS = [
   {
     id: "hybrid-crisp",
     name: "Hybrid Crisp",
-    description: "PixelForge Hybrid edge-medoid downsampling + OKLab 24 colours + Blue Noise + orphan cleanup.",
-    settings: { size: { width: 128, resample: "hybrid" }, palette: { source: "extract", count: 24 }, dither: { method: "bluenoise", strength: 0.45 }, cleanup: { orphans: true } }
+    description: "Bimodal-Plateau edge downsampling + local micro-contrast + OKLab 28 colours + Blue Noise.",
+    settings: { size: { width: 136, resample: "hybrid" }, adjust: { clahe: 0.25 }, palette: { source: "extract", count: 28 }, dither: { method: "bluenoise", strength: 0.45 }, cleanup: { orphans: true } }
   },
   {
     id: "kurzgesagt",
-    name: "Kurzgesagt Cosmic",
-    description: "GPU Kuwahara flat-paint brush + Hybrid crisp edges + Kurzgesagt Cosmic 24 + Blue Noise.",
-    settings: { size: { width: 144, resample: "hybrid" }, adjust: { contrast: 0.12, saturation: 0.18, kuwahara: 3 }, palette: { source: "builtin", id: "kurzgesagt-24" }, dither: { method: "bluenoise", strength: 0.35 }, cleanup: { orphans: true } }
+    name: "Kurzgesagt Glow",
+    description: "GPU Kuwahara flat-paint brush + Kurzgesagt Cosmic 24 + Bioluminescent Bloom FX.",
+    settings: { size: { width: 144, resample: "hybrid" }, adjust: { contrast: 0.1, saturation: 0.18, kuwahara: 3 }, palette: { source: "builtin", id: "kurzgesagt-24" }, dither: { method: "bluenoise", strength: 0.35 }, cleanup: { orphans: true }, fx: { mode: "bloom", strength: 0.55 } }
+  },
+  {
+    id: "crt-arcade",
+    name: "CRT Arcade",
+    description: "1989 Trinitron arcade monitor: Endesga 32 + Bayer 4\xD74 + CRT phosphor grille, scanlines & RGB shift.",
+    settings: { size: { width: 144, resample: "hybrid" }, adjust: { contrast: 0.12, saturation: 0.12, clahe: 0.2 }, palette: { source: "builtin", id: "endesga-32" }, dither: { method: "bayer4", strength: 0.65 }, fx: { mode: "crt", strength: 0.68, scanlines: 0.55, aberration: 0.85 } }
   },
   {
     id: "chunky-ink",
-    name: "Chunky Cartoon Ink",
-    description: "Kuwahara flat blocks + Endesga 32 + 1px internal comic ink outlines.",
-    settings: { size: { width: 120, resample: "hybrid" }, adjust: { kuwahara: 3 }, palette: { source: "builtin", id: "endesga-32" }, dither: { method: "none" }, cleanup: { orphans: true, smooth: true }, outline: { mode: "ink", color: "#181425" } }
+    name: "Chunky Ink",
+    description: "Kuwahara flat blocks + Endesga 32 + 1px internal comic ink contour outlines.",
+    settings: { size: { width: 124, resample: "hybrid" }, adjust: { kuwahara: 3, clahe: 0.18 }, palette: { source: "builtin", id: "endesga-32" }, dither: { method: "none" }, cleanup: { orphans: true, smooth: true }, outline: { mode: "ink", color: "#141020" } }
   },
   {
     id: "pc98-cyber",
-    name: "PC-9801 Cyber",
+    name: "PC-98 Cyber",
     description: "Sobel edge-preserving downsampling + NEC PC-98 Cyber 16 + Bayer 4\xD74 + dark ink lines.",
-    settings: { size: { width: 160, resample: "sobel" }, palette: { source: "builtin", id: "pc98-cyber-16" }, dither: { method: "bayer4", strength: 0.65 }, outline: { mode: "ink", color: "#080614" } }
+    settings: { size: { width: 160, resample: "sobel" }, adjust: { clahe: 0.2 }, palette: { source: "builtin", id: "pc98-cyber-16" }, dither: { method: "bayer4", strength: 0.65 }, outline: { mode: "ink", color: "#080614" } }
+  },
+  {
+    id: "voxel-3d",
+    name: "Voxel 3D",
+    description: "Lit 3D micro-voxel bevel shading over Resurrect 64 crisp blocks.",
+    settings: { size: { width: 104, resample: "hybrid" }, adjust: { kuwahara: 2, clahe: 0.2 }, palette: { source: "builtin", id: "resurrect-64" }, dither: { method: "none" }, cleanup: { orphans: true }, fx: { mode: "voxel", strength: 0.72 } }
+  },
+  {
+    id: "oscilloscope-xy",
+    name: "Oscilloscope",
+    description: "Calibrated P31 emerald phosphor vector beam & CRT graticule grid.",
+    settings: { size: { width: 176, resample: "sobel" }, adjust: { clahe: 0.35 }, palette: { source: "extract", count: 16 }, dither: { method: "bayer4", strength: 0.4 }, fx: { mode: "oscilloscope", strength: 0.92, scanlines: 0.25 } }
+  },
+  {
+    id: "cyber-blueprint",
+    name: "Blueprint",
+    description: "Architectural cyan contour wireframe on deep Prussian drafting grid.",
+    settings: { size: { width: 176, resample: "sobel" }, adjust: { clahe: 0.3 }, palette: { source: "extract", count: 16 }, dither: { method: "none" }, fx: { mode: "blueprint", strength: 0.92 } }
   },
   {
     id: "aloboi-dream",
-    name: "Aloboi Dreamcore",
-    description: "Aloboi Dreamcore 16 pastel synthwave palette + Sierra Lite smooth diffusion.",
-    settings: { size: { width: 140, resample: "hybrid" }, palette: { source: "builtin", id: "aloboi-dream-16" }, dither: { method: "sierra-lite", strength: 0.65 } }
-  },
-  {
-    id: "balanced",
-    name: "Balanced",
-    description: "Endesga 32, Bayer 4\xD74, Hybrid edge resampling.",
-    settings: { size: { width: 96, resample: "hybrid" }, palette: { source: "builtin", id: "endesga-32" }, dither: { method: "bayer4", strength: 0.6 } }
-  },
-  {
-    id: "game-boy",
-    name: "Game Boy",
-    description: "Four greens, 160 px wide, ordered dither.",
-    settings: { size: { width: 160, resample: "hybrid" }, palette: { source: "builtin", id: "game-boy-dmg" }, dither: { method: "bayer4", strength: 1 }, adjust: { contrast: 0.15 } }
+    name: "Dreamcore",
+    description: "Aloboi Dreamcore 16 pastel synthwave palette + Sierra Lite + soft neon glow.",
+    settings: { size: { width: 140, resample: "hybrid" }, palette: { source: "builtin", id: "aloboi-dream-16" }, dither: { method: "sierra-lite", strength: 0.65 }, fx: { mode: "bloom", strength: 0.35 } }
   },
   {
     id: "pico-8",
     name: "PICO-8",
-    description: "128 px, the PICO-8 palette, blue-noise dither.",
-    settings: { size: { width: 128, resample: "hybrid" }, palette: { source: "builtin", id: "pico-8" }, dither: { method: "bluenoise", strength: 0.7 } }
+    description: "128 px fantasy console look with the 16-colour PICO-8 palette & Blue Noise.",
+    settings: { size: { width: 128, resample: "hybrid" }, adjust: { clahe: 0.15 }, palette: { source: "builtin", id: "pico-8" }, dither: { method: "bluenoise", strength: 0.7 } }
+  },
+  {
+    id: "game-boy",
+    name: "Game Boy LCD",
+    description: "DMG-01 four olive greens, 160 px wide, Bayer 4\xD74 + dot-matrix LCD grid.",
+    settings: { size: { width: 160, resample: "hybrid" }, adjust: { contrast: 0.15, clahe: 0.2 }, palette: { source: "builtin", id: "game-boy-dmg" }, dither: { method: "bayer4", strength: 1 }, fx: { mode: "lcd", strength: 0.55 } }
   },
   {
     id: "one-bit",
-    name: "1-bit Atkinson",
-    description: "Classic Mac look: two colours, Atkinson diffusion.",
-    settings: { size: { width: 192, resample: "hybrid" }, palette: { source: "builtin", id: "1-bit-monitor" }, dither: { method: "atkinson", strength: 1 }, adjust: { contrast: 0.2 } }
+    name: "1-Bit Mac",
+    description: "Classic Macintosh monochrome: two colours, Atkinson diffusion & crisp local contrast.",
+    settings: { size: { width: 192, resample: "hybrid" }, adjust: { contrast: 0.2, clahe: 0.25 }, palette: { source: "builtin", id: "1-bit-monitor" }, dither: { method: "atkinson", strength: 1 } }
   },
   {
     id: "faithful",
-    name: "Faithful colour",
-    description: "OKLab palette extracted from the image, Floyd\u2013Steinberg.",
-    settings: { size: { width: 128, resample: "hybrid" }, palette: { source: "extract", count: 24 }, dither: { method: "floyd-steinberg", strength: 0.75 } }
+    name: "Faithful OKLab",
+    description: "28 salient OKLab colours extracted from the photo + Floyd\u2013Steinberg diffusion.",
+    settings: { size: { width: 136, resample: "hybrid" }, adjust: { clahe: 0.15 }, palette: { source: "extract", count: 28 }, dither: { method: "floyd-steinberg", strength: 0.75 } }
+  },
+  {
+    id: "balanced",
+    name: "Balanced",
+    description: "Endesga 32, Bayer 4\xD74, Hybrid Bimodal-Plateau edge resampling.",
+    settings: { size: { width: 112, resample: "hybrid" }, palette: { source: "builtin", id: "endesga-32" }, dither: { method: "bayer4", strength: 0.6 } }
   },
   {
     id: "sprite",
-    name: "Clean sprite",
-    description: "No dither, Hybrid edges, orphan cleanup and a dark outer outline.",
-    settings: { size: { width: 48, resample: "hybrid" }, palette: { source: "extract", count: 12 }, dither: { method: "none" }, cleanup: { orphans: true }, outline: { mode: "outer", color: "#1a1c2c" } }
+    name: "Clean Sprite",
+    description: "No dither, Hybrid edges, orphan cleanup and a dark 1px outer sprite outline.",
+    settings: { size: { width: 56, resample: "hybrid" }, palette: { source: "extract", count: 12 }, dither: { method: "none" }, cleanup: { orphans: true }, outline: { mode: "outer", color: "#1a1c2c" } }
   },
   {
     id: "cga",
-    name: "CGA",
-    description: "16 hard colours with an 8\xD78 Bayer pattern.",
+    name: "IBM CGA",
+    description: "16 hard hardware colours with an 8\xD78 Bayer pattern.",
     settings: { size: { width: 160, resample: "hybrid" }, palette: { source: "builtin", id: "cga-16" }, dither: { method: "bayer8", strength: 1 } }
   },
   {
     id: "newsprint",
     name: "Newsprint",
-    description: "Grey clustered-dot halftone.",
-    settings: { size: { width: 220, resample: "box" }, palette: { source: "builtin", id: "grayscale-4" }, dither: { method: "cluster8", strength: 1 }, adjust: { saturation: -1 } }
+    description: "Greyscale clustered-dot rotary press halftone.",
+    settings: { size: { width: 220, resample: "box" }, palette: { source: "builtin", id: "grayscale-4" }, dither: { method: "cluster8", strength: 1 }, adjust: { saturation: -1, clahe: 0.2 } }
   },
   {
     id: "soft",
-    name: "Soft painterly",
-    description: "Resurrect 64 with Sierra Lite and a light smooth.",
-    settings: { size: { width: 112, resample: "hybrid" }, palette: { source: "builtin", id: "resurrect-64" }, dither: { method: "sierra-lite", strength: 0.6 }, cleanup: { smooth: true } }
+    name: "Soft Painterly",
+    description: "Resurrect 64 with Sierra Lite diffusion and majority smoothing.",
+    settings: { size: { width: 116, resample: "hybrid" }, palette: { source: "builtin", id: "resurrect-64" }, dither: { method: "sierra-lite", strength: 0.6 }, cleanup: { smooth: true } }
   }
 ];
 var getPreset = (id) => PRESETS.find((p) => p.id === id) || null;
