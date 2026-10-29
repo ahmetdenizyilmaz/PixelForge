@@ -1,10 +1,11 @@
-// Builds the static PixelForge Studio site into _site/.
+// Builds the static PixelForge website, Workstation, Interactive Lab, and Docs into _site/.
 import { esbuild } from './esbuild.mjs';
 import { readFileSync, writeFileSync, mkdirSync, rmSync, readdirSync, existsSync } from 'node:fs';
-import { copy, isDir, countFiles } from './fsutil.mjs';
+import { copy, countFiles } from './fsutil.mjs';
 import { join, dirname, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { renderMarkdown, frontMatter, esc } from './markdown.mjs';
+import { FORGE_LOGO_SVG } from '../lib/editor/icons.js';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SITE = join(ROOT, 'site');
@@ -16,7 +17,11 @@ const write = (rel, content) => { const f = join(OUT, rel); mkdirSync(dirname(f)
 const read = rel => readFileSync(join(SITE, rel), 'utf8');
 const up = depth => (depth ? '../'.repeat(depth) : './');
 
-const NAV = [['editor/', 'Studio Editor'], ['docs/', 'Docs'], ['examples/', 'Examples']];
+const NAV = [
+  ['editor/', 'Workstation'],
+  ['playground/', 'Interactive Lab'],
+  ['docs/', 'Docs'],
+];
 
 function page({ title, description = pkg.description, depth, body, active = '', scripts = [], styles = [], bodyClass = '' }) {
   const r = up(depth);
@@ -39,9 +44,10 @@ ${styles.map(s => `<link rel="stylesheet" href="${r}${s}">`).join('\n')}
 <body class="${bodyClass}">
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-top">
-  <a class="brand" href="${r}"><span class="mark" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span><span>PixelForge</span></a>
+  <a class="brand" href="${r}">${FORGE_LOGO_SVG}<span>PixelForge</span></a>
   <nav class="site-nav" aria-label="Main">${nav}</nav>
   <div class="site-actions">
+    <a class="nav-cta hide-xs" href="${r}editor/">Launch Workstation</a>
     <a class="icon-link" href="${REPO}" aria-label="Source on GitHub" title="Source on GitHub"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 19c-4 1.3-4-2-5.5-2.5M14.5 21v-3.2c0-1 .1-1.4-.5-2 2.6-.3 5.5-1.3 5.5-5.8a4.5 4.5 0 0 0-1.2-3.1 4.2 4.2 0 0 0-.1-3.1s-1-.3-3.3 1.2a11.4 11.4 0 0 0-6 0C6.6 3.5 5.6 3.8 5.6 3.8a4.2 4.2 0 0 0-.1 3.1A4.5 4.5 0 0 0 4.3 10c0 4.5 2.9 5.5 5.5 5.8-.6.6-.6 1.2-.5 2V21"/></svg></a>
     <button class="icon-link theme-toggle" type="button" aria-label="Toggle theme" title="Toggle theme"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 14.5A7.5 7.5 0 0 1 9.5 4.5a7.5 7.5 0 1 0 10 10Z"/></svg></button>
   </div>
@@ -55,8 +61,8 @@ ${scripts.map(s => `<script type="module" src="${r}${s}"></script>`).join('\n')}
 }
 
 const footer = depth => `<footer class="site-foot"><div class="wrap">
-  <span>PixelForge ${pkg.version} (WebGL 2 Studio + 32-Thread Numba Core + 15-Tool MCP). MIT licence.</span>
-  <span class="links"><a href="${up(depth)}docs/">Docs</a><a href="${up(depth)}examples/">Examples</a><a href="${REPO}">GitHub</a></span>
+  <span class="foot-brand">${FORGE_LOGO_SVG}<span>PixelForge ${pkg.version} — WebGL 2 Workstation · OKLab-BGM &amp; Posterior Shaders · 32-Thread Numba Core · 15-Tool MCP. MIT License.</span></span>
+  <span class="links"><a href="${up(depth)}editor/">Workstation</a><a href="${up(depth)}playground/">Interactive Lab</a><a href="${up(depth)}docs/">Docs</a><a href="${REPO}">GitHub</a></span>
 </div></footer>`;
 
 rmSync(OUT, { recursive: true, force: true });
@@ -69,7 +75,7 @@ const bundle = (entry, outfile, opts = {}) => esbuild.build({
 const pageJS = { format: 'esm', sourcemap: true, target: 'es2022', external: ['node:*'] };
 await bundle(join(SITE, 'assets/editor-page.js'), 'assets/editor.js', pageJS);
 await bundle(join(SITE, 'assets/landing.js'), 'assets/landing.js', pageJS);
-await bundle(join(SITE, 'assets/gallery.js'), 'assets/gallery.js', pageJS);
+await bundle(join(SITE, 'assets/playground.js'), 'assets/playground.js', pageJS);
 await bundle(join(SITE, 'assets/site.js'), 'assets/site.js', { format: 'iife', target: 'es2018' });
 const css = { external: ['*.woff2'] };
 await bundle(join(SITE, 'assets/site.css'), 'assets/site.css', css);
@@ -88,31 +94,44 @@ for (const f of readdirSync(join(ROOT, 'dist'))) if (/\.(js|css|cjs)$/.test(f)) 
 copy(join(ROOT, 'lib/editor/styles/fonts'), join(OUT, 'lib/fonts'));
 
 write('index.html', page({
-  title: 'PixelForge: Hybrid Edge-Aware Pixel Art Studio & Engine',
-  description: 'Real-time WebGL 2 Pixel Art Studio, 32-Thread Numba Python Core, Game-Asset Exporters, and 15-Tool MCP Server.',
-  depth: 0, active: '', body: read('index.html').replace(/\{\{root\}\}/g, './').replace('{{footer}}', footer(0)).replace(/\{\{version\}\}/g, pkg.version),
+  title: 'PixelForge · Scientific Pixel Art Workstation & Dual-Runtime Engine',
+  description: 'Real-time WebGL 2 Pixel Art Workstation, OKLab-BGM & Bayesian Posterior Shaders, 32-Thread Numba Python Core, Game Tileset Packers, and 15-Tool MCP Server.',
+  depth: 0, active: '',
+  body: read('index.html').replace(/\{\{root\}\}/g, './').replace('{{footer}}', footer(0)).replace(/\{\{version\}\}/g, pkg.version),
   scripts: ['assets/landing.js'], bodyClass: 'landing',
 }));
 
 write('editor/index.html', page({
-  title: 'Studio Editor · PixelForge', description: 'Turn images and video into crisp pixel art in your browser on WebGL 2.',
-  depth: 1, active: 'editor/', body: read('editor/index.html'), styles: ['assets/editor.css'], scripts: ['assets/editor.js'], bodyClass: 'app',
+  title: 'Workstation · PixelForge',
+  description: '5-viewport WebGL 2 pixel-art workstation with non-destructive retouch tools, OKLab-BGM discovery, 12x loupe, and mirror-deduplicated tileset studio.',
+  depth: 1, active: 'editor/',
+  body: read('editor/index.html'), styles: ['assets/editor.css'], scripts: ['assets/editor.js'], bodyClass: 'app',
+}));
+
+write('playground/index.html', page({
+  title: 'Interactive Algorithm & Game-Asset Lab · PixelForge',
+  description: 'Compare Bayesian Posterior dithering, OKLab-BGM palette discovery, mirror-deduplicated tilesets, and procedural OKLab color ramps live on WebGL 2.',
+  depth: 1, active: 'playground/',
+  body: read('playground/index.html').replace('{{footer}}', footer(1)),
+  scripts: ['assets/playground.js'], bodyClass: 'playground-page',
 }));
 
 const docs = readdirSync(join(SITE, 'docs')).filter(f => f.endsWith('.md')).map(f => {
   const { data, body } = frontMatter(readFileSync(join(SITE, 'docs', f), 'utf8'));
   return { slug: f.replace(/\.md$/, ''), ...data, body };
 });
-const GROUPS = ['Start', 'Editor', 'Library', 'Project'];
+const GROUPS = ['Overview', 'Workstation', 'Developers'];
 docs.sort((a, b) => GROUPS.indexOf(a.group) - GROUPS.indexOf(b.group) || (a.order ?? 99) - (b.order ?? 99));
-const pages = docs.filter(d => d.slug !== 'index');
 
 function docNav(current, depth) {
   const r = up(depth);
   return GROUPS.map(g => {
-    const list = pages.filter(p => p.group === g);
+    const list = docs.filter(p => p.group === g);
     if (!list.length) return '';
-    return `<div class="nav-group"><div class="nav-label">${g}</div>${list.map(p => `<a href="${r}docs/${p.slug}/"${p.slug === current ? ' aria-current="page"' : ''}>${esc(p.title)}</a>`).join('')}</div>`;
+    return `<div class="nav-group"><div class="nav-label">${g}</div>${list.map(p => {
+      const href = p.slug === 'index' ? `${r}docs/` : `${r}docs/${p.slug}/`;
+      return `<a href="${href}"${p.slug === current ? ' aria-current="page"' : ''}>${esc(p.title)}</a>`;
+    }).join('')}</div>`;
   }).join('');
 }
 
@@ -120,56 +139,30 @@ for (const d of docs) {
   const isIndex = d.slug === 'index';
   const depth = isIndex ? 1 : 2;
   const { html, toc, h1 } = renderMarkdown(d.body);
-  const idx = pages.indexOf(d);
-  const prev = idx > 0 ? pages[idx - 1] : null, next = idx >= 0 && idx < pages.length - 1 ? pages[idx + 1] : null;
+  const idx = docs.indexOf(d);
+  const prev = idx > 0 ? docs[idx - 1] : null;
+  const next = idx >= 0 && idx < docs.length - 1 ? docs[idx + 1] : null;
   const r = up(depth);
-  const pager = isIndex ? '' : `<nav class="pager" aria-label="Pages">${prev ? `<a class="prev" href="${r}docs/${prev.slug}/"><small>Previous</small>${esc(prev.title)}</a>` : '<span></span>'}${next ? `<a class="next" href="${r}docs/${next.slug}/"><small>Next</small>${esc(next.title)}</a>` : ''}</nav>`;
+  const docHref = p => (p.slug === 'index' ? `${r}docs/` : `${r}docs/${p.slug}/`);
+  const pager = `<nav class="pager" aria-label="Pages">${prev ? `<a class="prev" href="${docHref(prev)}"><small>Previous</small>${esc(prev.title)}</a>` : '<span></span>'}${next ? `<a class="next" href="${docHref(next)}"><small>Next</small>${esc(next.title)}</a>` : ''}</nav>`;
   const content = isIndex ? html.replace(/href="\.\.\//g, 'href="') : html;
   const body = `<div class="docs" id="main">
-  <button class="docs-menu" type="button" aria-expanded="false" aria-controls="docs-nav">Menu</button>
+  <button class="docs-menu" type="button" aria-expanded="false" aria-controls="docs-nav">Documentation Menu</button>
   <nav class="docs-nav" id="docs-nav" aria-label="Documentation">${docNav(d.slug, depth)}</nav>
   <article class="prose">
     <header class="doc-head"><p class="crumb">${esc(d.group || 'Docs')}</p><h1>${esc(h1 || d.title)}</h1>${d.description ? `<p class="lede">${esc(d.description)}</p>` : ''}</header>
     ${content}
     ${pager}
   </article>
-  ${toc.length > 2 ? `<aside class="toc" aria-label="On this page"><div class="nav-label">On this page</div>${toc.map(t => `<a class="d${t.depth}" href="#${t.id}">${esc(t.text)}</a>`).join('')}</aside>` : '<aside class="toc"></aside>'}
+  ${toc.length > 1 ? `<aside class="toc" aria-label="On this page"><div class="nav-label">On this page</div>${toc.map(t => `<a class="d${t.depth}" href="#${t.id}">${esc(t.text)}</a>`).join('')}</aside>` : '<aside class="toc"></aside>'}
 </div>${footer(depth)}`;
-  write(isIndex ? 'docs/index.html' : `docs/${d.slug}/index.html`, page({ title: `${d.title} · PixelForge docs`, description: d.description, depth, body, active: 'docs/' }));
+  write(isIndex ? 'docs/index.html' : `docs/${d.slug}/index.html`, page({ title: `${d.title} · PixelForge Docs`, description: d.description, depth, body, active: 'docs/' }));
 }
-
-const exDir = join(SITE, 'examples');
-const examples = readdirSync(exDir).filter(n => isDir(join(exDir, n))).map(n => ({ slug: n, ...JSON.parse(readFileSync(join(exDir, n, 'example.json'), 'utf8')) }))
-  .sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
-for (const ex of examples) {
-  copy(join(exDir, ex.slug), join(OUT, 'examples', ex.slug), src => !src.endsWith('example.json'));
-  const htmlFile = join(OUT, 'examples', ex.slug, 'index.html');
-  const inner = readFileSync(htmlFile, 'utf8');
-  if (!/^<!doctype/i.test(inner.trim())) {
-    const body = `<main class="example" id="main"><div class="wrap">
-  <p class="crumb"><a href="../">Examples</a></p>
-  <h1>${esc(ex.title)}</h1><p class="lede">${esc(ex.description)}</p>
-  ${inner}
-  <details class="source"><summary>Source</summary><figure class="code"><pre><code>${esc(inner.trim())}</code></pre><button class="copy" type="button" aria-label="Copy code">Copy</button></figure></details>
-</div></main>${footer(2)}`;
-    writeFileSync(htmlFile, page({ title: `${ex.title} · PixelForge examples`, description: ex.description, depth: 2, body, active: 'examples/', bodyClass: 'example-page' }));
-  }
-}
-const cards = examples.map(ex => `<a class="ex-card" href="${ex.slug}/">
-  <canvas class="ex-thumb" width="160" height="120" data-preset='${esc(JSON.stringify(ex.preview || {}))}' data-sample="${esc(ex.sample || 'mountain-fjord')}" aria-hidden="true"></canvas>
-  <span class="t">${esc(ex.title)}</span><span class="d">${esc(ex.description)}</span>
-  <span class="tags">${(ex.tags || []).map(t => `<span>${esc(t)}</span>`).join('')}</span>
-</a>`).join('\n');
-write('examples/index.html', page({
-  title: 'Examples · PixelForge', description: 'Copyable examples of the PixelForge JS/WebGL2 library.', depth: 1, active: 'examples/',
-  body: `<main class="gallery" id="main"><div class="wrap"><h1>Examples</h1><p class="lede">Each one is a single HTML page using the library from <code>lib/</code>. Thumbnails are rendered live with the engine.</p><div class="ex-grid">${cards}</div></div></main>${footer(1)}`,
-  scripts: ['assets/gallery.js'],
-}));
 
 write('404.html', page({
-  title: 'Not found · PixelForge', depth: 0, active: '',
-  body: `<main class="notfound" id="main"><div class="wrap"><h1>Nothing at this address</h1><p class="lede">The page may have moved. Try the <a href="./editor/">Studio editor</a> or the <a href="./docs/">docs</a>.</p></div></main>`,
+  title: 'Page Not Found · PixelForge', depth: 0, active: '',
+  body: `<main class="notfound" id="main"><div class="wrap"><h1>Nothing at this address</h1><p class="lede">Try the <a href="./editor/">PixelForge Workstation</a>, the <a href="./playground/">Interactive Lab</a>, or the <a href="./docs/">Documentation</a>.</p></div></main>${footer(0)}`,
 }));
 
 write('.nojekyll', '');
-console.log(`site built: ${relative(ROOT, OUT)}/ (${countFiles(OUT)} files, ${docs.length} docs pages, ${examples.length} examples)`);
+console.log(`site built: ${relative(ROOT, OUT)}/ (${countFiles(OUT)} files, ${docs.length} docs pages, interactive playground)`);

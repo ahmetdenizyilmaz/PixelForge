@@ -1,4 +1,4 @@
-// Markdown → HTML for the docs: highlighted code, callouts, heading anchors, a table of contents.
+// Markdown → HTML for PixelForge docs: syntax-highlighted code, callouts, heading anchors, and table of contents.
 import { Marked } from 'marked';
 import hljs from 'highlight.js/lib/core';
 import js from 'highlight.js/lib/languages/javascript';
@@ -9,24 +9,35 @@ import bash from 'highlight.js/lib/languages/bash';
 import json from 'highlight.js/lib/languages/json';
 import glsl from 'highlight.js/lib/languages/glsl';
 import powershell from 'highlight.js/lib/languages/powershell';
+import python from 'highlight.js/lib/languages/python';
 
-hljs.registerLanguage('javascript', js); hljs.registerLanguage('typescript', ts); hljs.registerLanguage('xml', xml);
-hljs.registerLanguage('css', css); hljs.registerLanguage('bash', bash); hljs.registerLanguage('json', json);
-hljs.registerLanguage('glsl', glsl); hljs.registerLanguage('powershell', powershell);
+hljs.registerLanguage('javascript', js);
+hljs.registerLanguage('typescript', ts);
+hljs.registerLanguage('xml', xml);
+hljs.registerLanguage('css', css);
+hljs.registerLanguage('bash', bash);
+hljs.registerLanguage('json', json);
+hljs.registerLanguage('glsl', glsl);
+hljs.registerLanguage('powershell', powershell);
+hljs.registerLanguage('python', python);
 hljs.registerAliases(['js', 'mjs'], { languageName: 'javascript' });
 hljs.registerAliases(['ts'], { languageName: 'typescript' });
 hljs.registerAliases(['html'], { languageName: 'xml' });
 hljs.registerAliases(['sh', 'shell'], { languageName: 'bash' });
 hljs.registerAliases(['ps1', 'pwsh'], { languageName: 'powershell' });
+hljs.registerAliases(['py'], { languageName: 'python' });
 
 export const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 export const slugify = s => s.toLowerCase().replace(/<[^>]+>/g, '').replace(/&[a-z#0-9]+;/g, '').replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-');
 const stripTags = s => s.replace(/<[^>]+>/g, '');
 
 const LABEL = { note: 'Note', tip: 'Tip', warning: 'Warning' };
-const LANG = { javascript: 'JavaScript', js: 'JavaScript', ts: 'TypeScript', typescript: 'TypeScript', html: 'HTML', glsl: 'GLSL', bash: 'Terminal', sh: 'Terminal', powershell: 'PowerShell', json: 'JSON', css: 'CSS' };
+const LANG = {
+  javascript: 'JavaScript', js: 'JavaScript', ts: 'TypeScript', typescript: 'TypeScript',
+  python: 'Python', py: 'Python', html: 'HTML', glsl: 'GLSL',
+  bash: 'Terminal', sh: 'Terminal', powershell: 'PowerShell', json: 'JSON', css: 'CSS',
+};
 
-/** Split `---\nkey: value\n---` front matter from the body. */
 export function frontMatter(src) {
   const m = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(src);
   if (!m) return { data: {}, body: src };

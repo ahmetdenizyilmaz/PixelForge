@@ -1,4 +1,4 @@
-// Shared site behaviour: theme toggle, copy buttons, docs menu.
+// Shared PixelForge website behaviour: theme persistence, copy buttons, docs drawer, and code tabs.
 (function () {
   var root = document.documentElement;
   function current() {
@@ -18,24 +18,43 @@
     if (t) {
       var next = current() === 'dark' ? 'light' : 'dark';
       root.dataset.theme = next;
-      try { localStorage.setItem('itp:theme', JSON.stringify(next)); } catch (_) { /* storage off */ }
+      try { localStorage.setItem('pf:theme', JSON.stringify(next)); } catch (_) { /* storage off */ }
       paint();
-      document.dispatchEvent(new CustomEvent('itp:theme', { detail: next }));
+      document.dispatchEvent(new CustomEvent('pf:theme', { detail: next }));
+      return;
+    }
+    var tab = e.target.closest('[data-code-tab]');
+    if (tab) {
+      var box = tab.closest('[data-code-switcher]');
+      if (box) {
+        var key = tab.getAttribute('data-code-tab');
+        box.querySelectorAll('[data-code-tab]').forEach(function (btn) {
+          btn.setAttribute('aria-selected', String(btn === tab));
+        });
+        box.querySelectorAll('[data-code-pane]').forEach(function (pane) {
+          pane.hidden = pane.getAttribute('data-code-pane') !== key;
+        });
+      }
       return;
     }
     var c = e.target.closest('figure.code .copy, [data-copy]');
     if (c) {
-      var text = c.dataset.copy || c.closest('figure').querySelector('code').innerText;
+      var text = c.dataset.copy || (c.closest('figure') && c.closest('figure').querySelector('code').innerText) || '';
+      if (!text) return;
       navigator.clipboard.writeText(text).then(function () {
-        var old = c.textContent; c.textContent = 'Copied'; setTimeout(function () { c.textContent = old; }, 1200);
+        var old = c.textContent;
+        c.textContent = 'Copied!';
+        setTimeout(function () { c.textContent = old; }, 1200);
       });
       return;
     }
     var m = e.target.closest('.docs-menu');
     if (m) {
       var nav = document.getElementById('docs-nav');
-      var open = nav.classList.toggle('open');
-      m.setAttribute('aria-expanded', String(open));
+      if (nav) {
+        var open = nav.classList.toggle('open');
+        m.setAttribute('aria-expanded', String(open));
+      }
     }
   });
   paint();

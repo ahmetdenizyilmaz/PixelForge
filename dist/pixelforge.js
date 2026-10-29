@@ -226,12 +226,14 @@ ${rows.join("\n")}
     ASPECTS: () => ASPECTS,
     DEFAULTS: () => DEFAULTS,
     DITHER_METHODS: () => DITHER_METHODS,
+    EXTRACT_ALGOS: () => EXTRACT_ALGOS,
     FX_MODES: () => FX_MODES,
     KERNELS: () => KERNELS,
     LEGACY_DITHER: () => LEGACY_DITHER,
     MAX_SIZE: () => MAX_SIZE,
     PALETTES: () => PALETTES,
     PRESETS: () => PRESETS,
+    PRESET_CATEGORIES: () => PRESET_CATEGORIES,
     SETTINGS_VERSION: () => SETTINGS_VERSION,
     VERSION: () => VERSION2,
     bayer: () => bayer,
@@ -253,6 +255,7 @@ ${rows.join("\n")}
     fetchLospec: () => fetchLospec,
     forEachFrame: () => forEachFrame,
     frameTimes: () => frameTimes,
+    generateHarmonyRamp: () => generateHarmonyRamp,
     getPalette: () => getPalette,
     getPreset: () => getPreset,
     hasTransparency: () => hasTransparency,
@@ -264,6 +267,7 @@ ${rows.join("\n")}
     mergeSettings: () => mergeSettings,
     normalizeSettings: () => normalizeSettings,
     oklab: () => oklab,
+    oklabToRgbBytes: () => oklabToRgbBytes,
     packSpriteSheet: () => packSpriteSheet,
     parseColor: () => parseColor,
     parseMatrix: () => parseMatrix,
@@ -276,6 +280,7 @@ ${rows.join("\n")}
     settingsFromJSON: () => settingsFromJSON,
     settingsToJSON: () => settingsToJSON,
     sniffVideoCodec: () => sniffVideoCodec,
+    sortPaletteOKLab: () => sortPaletteOKLab,
     thresholdMap: () => thresholdMap,
     toCanvas: () => toCanvas,
     toFrame: () => toFrame,
@@ -339,34 +344,31 @@ ${rows.join("\n")}
   var SETTINGS_VERSION = 1;
   var MAX_SIZE = 2048;
   var DITHER_METHODS = [
-    { id: "none", label: "None", kind: "none" },
+    { id: "none", label: "None (Flat Quantize)", kind: "none" },
+    { id: "posterior", label: "Bayesian Posterior (OKLab)", kind: "posterior" },
+    { id: "bluenoise", label: "Blue Noise (64\xD764)", kind: "ordered" },
     { id: "bayer2", label: "Bayer 2\xD72", kind: "ordered" },
     { id: "bayer4", label: "Bayer 4\xD74", kind: "ordered" },
     { id: "bayer8", label: "Bayer 8\xD78", kind: "ordered" },
     { id: "bayer16", label: "Bayer 16\xD716", kind: "ordered" },
-    { id: "cluster4", label: "Clustered dot 4\xD74", kind: "ordered" },
-    { id: "cluster8", label: "Clustered dot 8\xD78", kind: "ordered" },
-    { id: "lines", label: "Horizontal lines", kind: "ordered" },
-    { id: "bluenoise", label: "Blue noise (64\xD764)", kind: "ordered" },
-    { id: "custom", label: "Custom matrix", kind: "ordered" },
+    { id: "cluster4", label: "Clustered Halftone 4\xD74", kind: "ordered" },
+    { id: "cluster8", label: "Clustered Halftone 8\xD78", kind: "ordered" },
+    { id: "lines", label: "Horizontal Scanlines", kind: "ordered" },
+    { id: "custom", label: "Custom Threshold Matrix", kind: "ordered" },
     { id: "floyd-steinberg", label: "Floyd\u2013Steinberg", kind: "diffusion" },
     { id: "atkinson", label: "Atkinson", kind: "diffusion" },
     { id: "sierra-lite", label: "Sierra Lite", kind: "diffusion" },
-    { id: "sierra", label: "Sierra", kind: "diffusion" },
+    { id: "sierra", label: "Sierra 3-Row", kind: "diffusion" },
     { id: "burkes", label: "Burkes", kind: "diffusion" },
     { id: "jarvis", label: "Jarvis\u2013Judice\u2013Ninke", kind: "diffusion" },
     { id: "stucki", label: "Stucki", kind: "diffusion" }
   ];
   var ditherKind = (id) => (DITHER_METHODS.find((m) => m.id === id) || { kind: "none" }).kind;
-  var LEGACY_DITHER = {
-    "none": "none",
-    "floyd-steinberg": "floyd-steinberg",
-    "atkinson": "atkinson",
-    "ordered": "bayer8",
-    "2x2 bayer": "bayer2",
-    "4x4 bayer": "bayer4",
-    "clustered 4x4": "cluster4"
-  };
+  var EXTRACT_ALGOS = [
+    { id: "oklab-bgm", label: "OKLab-BGM (Bayesian Gaussian EM)" },
+    { id: "oklab-salient", label: "OKLab Salient K-Means" },
+    { id: "median-cut", label: "Classic Median-Cut" }
+  ];
   var FX_MODES = [
     { id: "none", label: "None (Pure Pixel)" },
     { id: "bloom", label: "Bioluminescent Bloom" },
@@ -376,12 +378,23 @@ ${rows.join("\n")}
     { id: "oscilloscope", label: "Oscilloscope Vector" },
     { id: "blueprint", label: "Cyber Blueprint" }
   ];
+  var LEGACY_DITHER = {
+    "none": "none",
+    "floyd-steinberg": "floyd-steinberg",
+    "atkinson": "atkinson",
+    "ordered": "bayer8",
+    "2x2 bayer": "bayer2",
+    "4x4 bayer": "bayer4",
+    "clustered 4x4": "cluster4",
+    "posterior": "posterior",
+    "bgm_posterior": "posterior"
+  };
   var DEFAULTS = Object.freeze({
     version: SETTINGS_VERSION,
-    size: { mode: "width", width: 128, height: 0, block: 8, resample: "hybrid" },
-    adjust: { brightness: 0, contrast: 0, saturation: 0, hue: 0, gamma: 1, kuwahara: 0, clahe: 0 },
+    size: { mode: "width", width: 136, height: 0, block: 8, resample: "hybrid" },
+    adjust: { brightness: 0, contrast: 0, saturation: 0, hue: 0, gamma: 1, kuwahara: 0, clahe: 0, svd: 0 },
     frame: { aspect: "original", zoom: 1, x: 0.5, y: 0.5 },
-    palette: { source: "builtin", id: "endesga-32", name: "Endesga 32", colors: [], count: 24, distance: "oklab" },
+    palette: { source: "builtin", id: "endesga-32", name: "Endesga 32", colors: [], count: 24, distance: "oklab", algo: "oklab-bgm" },
     dither: { method: "bayer4", strength: 0.6, matrix: null },
     alpha: { threshold: 0.5 },
     cleanup: { orphans: false, smooth: false },
@@ -425,7 +438,8 @@ ${rows.join("\n")}
       hue: clamp(adj.hue, -180, 180, 0),
       gamma: clamp(adj.gamma, 0.2, 5, 1),
       kuwahara: Math.round(clamp(adj.kuwahara, 0, 4, 0)),
-      clahe: clamp(adj.clahe, 0, 1, 0)
+      clahe: clamp(adj.clahe, 0, 1, 0),
+      svd: clamp(adj.svd, 0, 1, 0)
     };
     const fr = i.frame || {};
     s.frame = {
@@ -435,13 +449,15 @@ ${rows.join("\n")}
       y: clamp(fr.y, 0, 1, 0.5)
     };
     const source = oneOf(pal.source, ["builtin", "custom", "extract", "none"], d.palette.source);
+    const algo = oneOf(pal.algo, EXTRACT_ALGOS.map((a) => a.id), d.palette.algo);
     s.palette = {
       source,
       id: typeof pal.id === "string" ? pal.id : source === "builtin" ? d.palette.id : "",
       name: typeof pal.name === "string" ? pal.name : "",
       colors: [],
       count: Math.round(clamp(pal.count, 2, 256, d.palette.count)),
-      distance: oneOf(pal.distance, ["oklab", "rgb"], d.palette.distance)
+      distance: oneOf(pal.distance, ["oklab", "rgb"], d.palette.distance),
+      algo
     };
     if (source === "builtin") {
       const p = getPalette(s.palette.id) || getPalette(d.palette.id);
@@ -453,9 +469,10 @@ ${rows.join("\n")}
       if (!s.palette.colors.length) s.palette.colors = ["#000000", "#ffffff"];
       s.palette.name = s.palette.name || "Custom";
     } else if (source === "extract") {
-      s.palette.name = `Extracted (${s.palette.count})`;
+      const tag = algo === "oklab-bgm" ? "OKLab-BGM" : algo === "oklab-salient" ? "OKLab Salient" : "Median-Cut";
+      s.palette.name = `${tag} (${s.palette.count})`;
     } else {
-      s.palette.name = "None";
+      s.palette.name = "Truecolor";
     }
     const method = DITHER_METHODS.some((m) => m.id === dit.method) ? dit.method : d.dither.method;
     s.dither = {
@@ -568,7 +585,10 @@ ${rows.join("\n")}
         delete out.palette.name;
       }
       if (s.palette.source !== "builtin") delete out.palette.id;
-      if (s.palette.source !== "extract") delete out.palette.count;
+      if (s.palette.source !== "extract") {
+        delete out.palette.count;
+        delete out.palette.algo;
+      }
     }
     if (out.palette && !Object.keys(out.palette).length) delete out.palette;
     return out;
@@ -740,7 +760,7 @@ ${rows.join("\n")}
     ];
   }
   function extractPalette(img, count = 16, opts = {}) {
-    const { maxSamples = 4e4, alphaThreshold = 0.5 } = opts;
+    const { maxSamples = 4e4, alphaThreshold = 0.5, algo = "oklab-bgm" } = opts;
     const n = img.width * img.height;
     const step = Math.max(1, Math.floor(n / maxSamples));
     const pts = [];
@@ -750,13 +770,15 @@ ${rows.join("\n")}
       pts.push(oklab(img.data[o] / 255, img.data[o + 1] / 255, img.data[o + 2] / 255));
     }
     if (!pts.length) return ["#000000", "#ffffff"].slice(0, Math.max(1, count));
-    const axisW = [1, 1.55, 1.55];
+    const classic = algo === "median-cut";
+    const axisW = classic ? [1, 1, 1] : [1, 1.55, 1.55];
+    const popExp = classic ? 0.55 : 0.42;
     let boxes = [pts];
     while (boxes.length < count) {
       let bi = -1, bestScore = -1, bestAxis = 0;
       boxes.forEach((b2, i) => {
         if (b2.length < 2) return;
-        const pop = Math.pow(b2.length, 0.42);
+        const pop = Math.pow(b2.length, popExp);
         for (let a = 0; a < 3; a++) {
           let lo = Infinity, hi = -Infinity;
           for (const p of b2) {
@@ -777,28 +799,189 @@ ${rows.join("\n")}
       boxes.splice(bi, 1, b.slice(0, mid), b.slice(mid));
     }
     let centers = boxes.map(mean);
-    for (let iter = 0; iter < 6; iter++) {
-      const sums = centers.map(() => [0, 0, 0, 0]);
-      for (const p of pts) {
-        let best = 0, bd = Infinity;
-        for (let c = 0; c < centers.length; c++) {
-          const dL = p[0] - centers[c][0], da = (p[1] - centers[c][1]) * 1.2, db = (p[2] - centers[c][2]) * 1.2;
-          const d = dL * dL + da * da + db * db;
-          if (d < bd) {
-            bd = d;
-            best = c;
+    if (algo === "oklab-bgm" && centers.length > 1) {
+      centers = refineBGM(pts, boxes, centers);
+    } else if (algo === "oklab-salient") {
+      for (let iter = 0; iter < 6; iter++) {
+        const sums = centers.map(() => [0, 0, 0, 0]);
+        for (const p of pts) {
+          let best = 0, bd = Infinity;
+          for (let c = 0; c < centers.length; c++) {
+            const dL = p[0] - centers[c][0], da = (p[1] - centers[c][1]) * 1.2, db = (p[2] - centers[c][2]) * 1.2;
+            const d = dL * dL + da * da + db * db;
+            if (d < bd) {
+              bd = d;
+              best = c;
+            }
           }
+          const s = sums[best];
+          s[0] += p[0];
+          s[1] += p[1];
+          s[2] += p[2];
+          s[3]++;
         }
-        const s = sums[best];
-        s[0] += p[0];
-        s[1] += p[1];
-        s[2] += p[2];
-        s[3]++;
+        centers = centers.map((c, i) => sums[i][3] ? [sums[i][0] / sums[i][3], sums[i][1] / sums[i][3], sums[i][2] / sums[i][3]] : c);
       }
-      centers = centers.map((c, i) => sums[i][3] ? [sums[i][0] / sums[i][3], sums[i][1] / sums[i][3], sums[i][2] / sums[i][3]] : c);
     }
     centers.sort((a, b) => a[0] - b[0]);
     return [...new Set(centers.map((c) => toHex(oklabToRgbBytes(c))))];
+  }
+  function refineBGM(pts, boxes, seeds) {
+    const K = seeds.length;
+    const N = pts.length;
+    const emStep = Math.max(1, Math.floor(N / 8192));
+    const sample = emStep === 1 ? pts : pts.filter((_, idx) => idx % emStep === 0);
+    const M = sample.length;
+    const mu = seeds.map((c) => [c[0], c[1], c[2]]);
+    const pi = boxes.map((b) => Math.max(1 / (K * 8), b.length / N));
+    const vars = boxes.map((b, k2) => {
+      let v0 = 0, v1 = 0, v2 = 0;
+      const m = mu[k2];
+      for (const p of b) {
+        v0 += (p[0] - m[0]) * (p[0] - m[0]);
+        v1 += (p[1] - m[1]) * (p[1] - m[1]);
+        v2 += (p[2] - m[2]) * (p[2] - m[2]);
+      }
+      const d = Math.max(1, b.length);
+      return [Math.max(12e-4, v0 / d), Math.max(8e-4, v1 / d), Math.max(8e-4, v2 / d)];
+    });
+    const alphaPrior = 0.35;
+    const tauPrior = 0.45;
+    const logR = new Float64Array(K);
+    const resp = new Float64Array(K);
+    for (let iter = 0; iter < 7; iter++) {
+      const nk = new Float64Array(K);
+      const s0 = new Float64Array(K), s1 = new Float64Array(K), s2 = new Float64Array(K);
+      const q0 = new Float64Array(K), q1 = new Float64Array(K), q2 = new Float64Array(K);
+      const logPi = pi.map((w) => Math.log(Math.max(1e-9, w)));
+      const halfLogDet = vars.map((v) => 0.5 * (Math.log(v[0]) + Math.log(v[1]) + Math.log(v[2])));
+      const inv2Var = vars.map((v) => [0.5 / v[0], 0.65 / v[1], 0.65 / v[2]]);
+      for (let i = 0; i < M; i++) {
+        const p = sample[i];
+        let maxLog = -Infinity;
+        for (let k2 = 0; k2 < K; k2++) {
+          const m = mu[k2], iv = inv2Var[k2];
+          const d0 = p[0] - m[0], d1 = p[1] - m[1], d2 = p[2] - m[2];
+          const lv = logPi[k2] - halfLogDet[k2] - (d0 * d0 * iv[0] + d1 * d1 * iv[1] + d2 * d2 * iv[2]);
+          logR[k2] = lv;
+          if (lv > maxLog) maxLog = lv;
+        }
+        let sumExp = 0;
+        for (let k2 = 0; k2 < K; k2++) {
+          const e = Math.exp(logR[k2] - maxLog);
+          resp[k2] = e;
+          sumExp += e;
+        }
+        const invSum = 1 / Math.max(1e-12, sumExp);
+        for (let k2 = 0; k2 < K; k2++) {
+          const r = resp[k2] * invSum;
+          nk[k2] += r;
+          s0[k2] += r * p[0];
+          s1[k2] += r * p[1];
+          s2[k2] += r * p[2];
+          const d0 = p[0] - mu[k2][0], d1 = p[1] - mu[k2][1], d2 = p[2] - mu[k2][2];
+          q0[k2] += r * d0 * d0;
+          q1[k2] += r * d1 * d1;
+          q2[k2] += r * d2 * d2;
+        }
+      }
+      const denomPi = M + K * alphaPrior;
+      for (let k2 = 0; k2 < K; k2++) {
+        pi[k2] = (nk[k2] + alphaPrior) / denomPi;
+        const dm = nk[k2] + tauPrior;
+        mu[k2][0] = (s0[k2] + tauPrior * seeds[k2][0]) / dm;
+        mu[k2][1] = (s1[k2] + tauPrior * seeds[k2][1]) / dm;
+        mu[k2][2] = (s2[k2] + tauPrior * seeds[k2][2]) / dm;
+        const dv = nk[k2] + 1;
+        vars[k2][0] = Math.max(9e-4, (q0[k2] + 18e-4) / dv);
+        vars[k2][1] = Math.max(6e-4, (q1[k2] + 12e-4) / dv);
+        vars[k2][2] = Math.max(6e-4, (q2[k2] + 12e-4) / dv);
+      }
+    }
+    return mu;
+  }
+  function sortPaletteOKLab(colors = []) {
+    return colors.slice().sort((ca, cb) => {
+      const [r1, g1, b1] = parseColor(ca), [r2, g2, b2] = parseColor(cb);
+      const o1 = oklab(r1 / 255, g1 / 255, b1 / 255);
+      const o2 = oklab(r2 / 255, g2 / 255, b2 / 255);
+      if (Math.abs(o1[0] - o2[0]) > 0.025) return o1[0] - o2[0];
+      return Math.atan2(o1[2], o1[1]) - Math.atan2(o2[2], o2[1]);
+    });
+  }
+  function generateHarmonyRamp(opts = {}) {
+    const {
+      seedHex = "#10d9a0",
+      baseHue,
+      mode,
+      scheme,
+      count,
+      chroma,
+      ramps = 4,
+      steps = 5,
+      hueShift = 0.55
+    } = opts;
+    let baseH, baseC;
+    if (baseHue !== void 0 && baseHue !== null) {
+      baseH = Number(baseHue) * Math.PI / 180;
+      baseC = Math.max(0.03, Math.min(0.28, chroma !== void 0 ? Number(chroma) : 0.14));
+    } else {
+      const [sr, sg, sb] = parseColor(seedHex);
+      const [, sa, sB] = oklab(sr / 255, sg / 255, sb / 255);
+      baseC = Math.max(0.03, Math.min(0.28, chroma !== void 0 ? Number(chroma) : Math.hypot(sa, sB) || 0.14));
+      baseH = Math.atan2(sB, sa);
+    }
+    const kind = String(mode || scheme || "cyber").toLowerCase().replace(/[^a-z]/g, "");
+    const offsetsByScheme = {
+      analogous: [0, 0.45, -0.45, 0.88, -0.88, 1.28],
+      complementary: [0, Math.PI, 0.36, Math.PI + 0.36, -0.38, Math.PI - 0.38],
+      split: [0, Math.PI * 0.78, -Math.PI * 0.78, 0.34, Math.PI * 0.78 + 0.3, -Math.PI * 0.78 - 0.3],
+      triadic: [0, 2 * Math.PI / 3, 4 * Math.PI / 3, 0.35, 2 * Math.PI / 3 + 0.35, 4 * Math.PI / 3 + 0.35],
+      cyber: [0, 1.05, -1.25, Math.PI * 0.88, 2.15, -0.55],
+      warmcool: [-0.42, 0.52, -0.85, 0.95, 0, Math.PI * 0.85],
+      earth: [0, 0.55, -0.65, 1.25, 2.55, -1.45],
+      mono: [0, 0.06, -0.06, 0.12, -0.12, 0.18]
+    };
+    const offs = offsetsByScheme[kind] || offsetsByScheme.cyber;
+    if (count !== void 0 && count !== null) {
+      const target = Math.max(2, Math.min(64, Math.round(Number(count) || 16)));
+      const nRamps2 = target <= 6 ? 1 : target <= 12 ? 2 : target <= 20 ? 4 : 4;
+      const baseSteps = Math.floor(target / nRamps2);
+      const extra = target % nRamps2;
+      const out2 = [];
+      for (let r = 0; r < nRamps2; r++) {
+        const nSteps2 = baseSteps + (r < extra ? 1 : 0);
+        const hCenter = baseH + offs[r % offs.length];
+        const chromaScale = kind === "mono" ? Math.max(0.2, 1 - r * 0.25) : r % 2 === 0 ? 1 : 0.84;
+        for (let i = 0; i < nSteps2; i++) {
+          const t = nSteps2 <= 1 ? 0.5 : i / (nSteps2 - 1);
+          const L = 0.15 + 0.78 * Math.pow(t, 0.92);
+          const hShiftFactor = kind === "warmcool" ? Math.max(0.45, hueShift) * 1.45 : hueShift * 1.15;
+          const h = hCenter + (t - 0.5) * hShiftFactor;
+          const bell = Math.sin(Math.PI * (0.1 + 0.8 * t));
+          const C = baseC * chromaScale * (0.35 + 0.85 * bell);
+          out2.push(toHex(oklabToRgbBytes([L, C * Math.cos(h), C * Math.sin(h)])));
+        }
+      }
+      return out2.slice(0, target);
+    }
+    const nRamps = Math.max(1, Math.min(6, ramps));
+    const nSteps = Math.max(2, Math.min(10, steps));
+    const out = [];
+    for (let r = 0; r < nRamps; r++) {
+      const hCenter = baseH + offs[r % offs.length];
+      const chromaScale = kind === "mono" ? Math.max(0.18, 1 - r * 0.28) : r % 2 === 0 ? 1 : 0.84;
+      for (let i = 0; i < nSteps; i++) {
+        const t = nSteps === 1 ? 0.5 : i / (nSteps - 1);
+        const L = 0.17 + 0.75 * Math.pow(t, 0.92);
+        const h = hCenter + (t - 0.5) * hueShift * 1.15;
+        const bell = Math.sin(Math.PI * (0.12 + 0.76 * t));
+        const C = baseC * chromaScale * (0.35 + 0.85 * bell);
+        const hex = toHex(oklabToRgbBytes([L, C * Math.cos(h), C * Math.sin(h)]));
+        if (!out.includes(hex)) out.push(hex);
+      }
+    }
+    return out;
   }
   function mean(list) {
     let l = 0, a = 0, b = 0;
@@ -996,6 +1179,42 @@ ${rows.join("\n")}
     for (let o = 3; o < buf.length; o += 4) buf[o] = buf[o] >= threshold && buf[o] > 0 ? 1 : 0;
     return buf;
   }
+  function svdDenoise(buf, w, h, amount = 0) {
+    if (!(amount > 1e-3)) return buf;
+    const src = buf.slice();
+    const sigS = 1.5 + 3.5 * amount;
+    const sigC = 0.012 + 0.16 * amount * amount;
+    const blend = Math.min(1, amount * 1.15);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const o = (y * w + x) * 4;
+        if (src[o + 3] < 0.5) continue;
+        const mr = src[o], mg = src[o + 1], mb = src[o + 2];
+        let sr = 0, sg = 0, sb = 0, sw = 0;
+        for (let dy = -2; dy <= 2; dy++) {
+          const yy = Math.max(0, Math.min(h - 1, y + dy));
+          for (let dx = -2; dx <= 2; dx++) {
+            const xx = Math.max(0, Math.min(w - 1, x + dx));
+            const qo = (yy * w + xx) * 4;
+            if (src[qo + 3] < 0.5) continue;
+            const ds2 = dx * dx + dy * dy;
+            const dr = src[qo] - mr, dg = src[qo + 1] - mg, db = src[qo + 2] - mb;
+            const dc2 = dr * dr + dg * dg + db * db;
+            const wt = Math.exp(-ds2 / sigS) * Math.exp(-dc2 / sigC);
+            sr += src[qo] * wt;
+            sg += src[qo + 1] * wt;
+            sb += src[qo + 2] * wt;
+            sw += wt;
+          }
+        }
+        if (sw <= 1e-6) continue;
+        buf[o] = clamp01(mr + (sr / sw - mr) * blend);
+        buf[o + 1] = clamp01(mg + (sg / sw - mg) * blend);
+        buf[o + 2] = clamp01(mb + (sb / sw - mb) * blend);
+      }
+    }
+    return buf;
+  }
   function localContrast(buf, w, h, amount = 0) {
     if (!(amount > 1e-3)) return buf;
     const src = buf.slice();
@@ -1064,24 +1283,68 @@ ${rows.join("\n")}
     }
     return best;
   }
+  function nearestTwo(sp, r, g, b) {
+    let p0, p1, p2, w0 = 1, w1 = 1.3225, w2 = 1.3225;
+    if (sp.distance === 1) {
+      p0 = r;
+      p1 = g;
+      p2 = b;
+      w0 = W_RGB[0];
+      w1 = W_RGB[1];
+      w2 = W_RGB[2];
+    } else [p0, p1, p2] = oklab(r, g, b);
+    let best1 = 0, best2 = 0, bd1 = Infinity, bd2 = Infinity;
+    const c = sp.coords;
+    for (let i = 0; i < sp.n; i++) {
+      const d0 = p0 - c[i * 3], d1 = p1 - c[i * 3 + 1], d2 = p2 - c[i * 3 + 2];
+      const dist = w0 * d0 * d0 + w1 * d1 * d1 + w2 * d2 * d2;
+      if (dist < bd1) {
+        bd2 = bd1;
+        best2 = best1;
+        bd1 = dist;
+        best1 = i;
+      } else if (dist < bd2) {
+        bd2 = dist;
+        best2 = i;
+      }
+    }
+    return [best1, bd1, best2, bd2];
+  }
   function quantizeOrdered(buf, w, h, plan) {
     const out = new Uint8ClampedArray(w * h * 4);
     const sp = plan.quantize ? paletteSpace(plan.palette, plan.distance) : null;
-    const map = plan.kind === "ordered" ? plan.map : null;
-    const amt = map ? plan.spread * plan.settings.dither.strength : 0;
+    const isPosterior = plan.kind === "posterior";
+    const map = plan.kind === "ordered" || isPosterior ? plan.map : null;
+    const str = clamp01(plan.settings.dither.strength);
+    const amt = plan.kind === "ordered" && map ? plan.spread * str : 0;
+    const gamma = 0.85 / Math.max(0.04, str);
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
         const o = (y * w + x) * 4;
         if (buf[o + 3] < 0.5) continue;
         let r = buf[o], g = buf[o + 1], b = buf[o + 2];
         if (sp) {
-          if (map) {
-            const t = (map.values[y % map.h * map.w + x % map.w] + 0.5) / map.levels - 0.5;
-            r = clamp01(r + t * amt);
-            g = clamp01(g + t * amt);
-            b = clamp01(b + t * amt);
+          let i;
+          if (isPosterior && map && sp.n >= 2 && str > 1e-3) {
+            const [best1, bd1, best2, bd2] = nearestTwo(sp, r, g, b);
+            if (best1 !== best2) {
+              const d1 = Math.sqrt(Math.max(0, bd1)), d2 = Math.sqrt(Math.max(0, bd2));
+              const ratio = clamp01(2 * d1 / Math.max(1e-6, d1 + d2));
+              const prob2 = 0.5 * Math.pow(ratio, gamma);
+              const bn = (map.values[y % map.h * map.w + x % map.w] + 0.5) / Math.max(1, map.levels);
+              i = best1 < best2 ? bn < prob2 ? best2 : best1 : 1 - bn < prob2 ? best2 : best1;
+            } else {
+              i = best1;
+            }
+          } else {
+            if (map) {
+              const t = (map.values[y % map.h * map.w + x % map.w] + 0.5) / map.levels - 0.5;
+              r = clamp01(r + t * amt);
+              g = clamp01(g + t * amt);
+              b = clamp01(b + t * amt);
+            }
+            i = nearest(sp, r, g, b);
           }
-          const i = nearest(sp, r, g, b);
           out[o] = plan.palette[i][0];
           out[o + 1] = plan.palette[i][1];
           out[o + 2] = plan.palette[i][2];
@@ -1367,7 +1630,7 @@ ${rows.join("\n")}
     const palette = quantize ? colors.map(parseColor) : [];
     let kind = quantize ? ditherKind(s.dither.method) : "none";
     if (s.dither.strength <= 0) kind = "none";
-    const map = kind === "ordered" ? thresholdMap(s.dither.method, s.dither.matrix) : null;
+    const map = kind === "ordered" ? thresholdMap(s.dither.method, s.dither.matrix) : kind === "posterior" ? thresholdMap("bluenoise", null) : null;
     const kernel = kind === "diffusion" ? KERNELS[s.dither.method] : null;
     const skew = kernel ? kernelSkew(kernel) : 1;
     return {
@@ -1375,13 +1638,11 @@ ${rows.join("\n")}
       srcWidth: src.width,
       srcHeight: src.height,
       crop,
-      // source pixels kept by the frame settings
       width,
       height,
       quantize,
       kind,
       palette,
-      // [[r, g, b] bytes]
       paletteHex: quantize ? colors.slice() : null,
       distance: s.palette.distance === "rgb" ? 1 : 0,
       spread: quantize ? paletteSpread(palette) : 0,
@@ -1397,10 +1658,15 @@ ${rows.join("\n")}
     const w = Math.max(1, Math.round(width * k2)), h = Math.max(1, Math.round(height * k2));
     const prep = resample(src, w, h, s.size.resample || "hybrid", crop, s.adjust.kuwahara || 0);
     adjust(prep, s.adjust);
+    if (s.adjust.svd > 1e-3) svdDenoise(prep, w, h, s.adjust.svd);
     if (s.adjust.clahe > 1e-3) localContrast(prep, w, h, s.adjust.clahe);
     const bytes = new Uint8ClampedArray(prep.length);
     for (let i = 0; i < prep.length; i++) bytes[i] = Math.round(prep[i] * 255);
-    return extractPalette({ data: bytes, width: w, height: h }, s.palette.count, { alphaThreshold: Math.max(0.01, s.alpha.threshold) });
+    return extractPalette(
+      { data: bytes, width: w, height: h },
+      s.palette.count,
+      { alphaThreshold: Math.max(0.01, s.alpha.threshold), algo: s.palette.algo || "oklab-bgm" }
+    );
   }
 
   // lib/core/cpu/pipeline.js
@@ -1409,6 +1675,7 @@ ${rows.join("\n")}
     const buf = resample(src, w, h, s.size.resample, plan.crop, s.adjust.kuwahara || 0);
     adjust(buf, s.adjust);
     alphaCut(buf, s.alpha.threshold);
+    if (s.adjust.svd > 1e-3) svdDenoise(buf, w, h, s.adjust.svd);
     if (s.adjust.clahe > 1e-3) localContrast(buf, w, h, s.adjust.clahe);
     const px = plan.kind === "diffusion" ? quantizeDiffusion(buf, w, h, plan) : quantizeOrdered(buf, w, h, plan);
     if (s.cleanup.orphans) removeOrphans(px, w, h);
@@ -4425,6 +4692,38 @@ void main() {
 }
 `
   );
+  var SVD = (
+    /* glsl */
+    `
+uniform float u_svd;
+void main() {
+  ivec2 P = topDown();
+  vec4 me = at(iChannel0, P);
+  if (u_svd <= 0.001 || me.a < 0.5) { fragColor = me; return; }
+  ivec2 R = ivec2(u_resolution);
+  float sigS = 1.5 + 3.5 * u_svd;
+  float sigC = 0.012 + 0.16 * u_svd * u_svd;
+  vec3 sumC = vec3(0.0);
+  float sumW = 0.0;
+  for (int dy = -2; dy <= 2; dy++) {
+    for (int dx = -2; dx <= 2; dx++) {
+      ivec2 Q = clamp(P + ivec2(dx, dy), ivec2(0), R - 1);
+      vec4 s = at(iChannel0, Q);
+      if (s.a < 0.5) continue;
+      float ds2 = float(dx * dx + dy * dy);
+      vec3 dc = s.rgb - me.rgb;
+      float dc2 = dot(dc, dc);
+      float w = exp(-ds2 / sigS) * exp(-dc2 / sigC);
+      sumC += s.rgb * w;
+      sumW += w;
+    }
+  }
+  if (sumW <= 1e-6) { fragColor = me; return; }
+  float blend = min(1.0, u_svd * 1.15);
+  fragColor = vec4(clamp(mix(me.rgb, sumC / sumW, blend), 0.0, 1.0), me.a);
+}
+`
+  );
   var CLAHE = (
     /* glsl */
     `
@@ -4461,6 +4760,7 @@ uniform sampler2D u_matrix;
 uniform int u_mode;
 uniform float u_levels;
 uniform float u_amount;
+uniform float u_strength;
 
 void main() {
   ivec2 P = topDown();
@@ -4468,6 +4768,38 @@ void main() {
   if (p.a < 0.5) { fragColor = vec4(0.0); return; }
   vec3 c = p.rgb;
   if (u_mode == 0) { fragColor = vec4(floor(c * 255.0 + 0.5) / 255.0, 1.0); return; }
+  if (u_mode == 3) {
+    vec3 sp = space(c);
+    vec3 w = u_distance == 1 ? vec3(0.299, 0.587, 0.114) : vec3(1.0, 1.15, 1.15);
+    int best1 = 0, best2 = 0;
+    float bd1 = 1e20, bd2 = 1e20;
+    for (int i = 0; i < 256; i++) {
+      if (i >= u_count) break;
+      vec3 d = sp - space(palColor(i));
+      float dist = dot(w * d, w * d);
+      if (dist < bd1) { bd2 = bd1; best2 = best1; bd1 = dist; best1 = i; }
+      else if (dist < bd2) { bd2 = dist; best2 = i; }
+    }
+    float str = clamp(u_strength, 0.0, 1.0);
+    int pick = best1;
+    if (u_count >= 2 && str > 0.001 && best1 != best2) {
+      float d1 = sqrt(max(0.0, bd1));
+      float d2 = sqrt(max(0.0, bd2));
+      float ratio = clamp(2.0 * d1 / max(1e-6, d1 + d2), 0.0, 1.0);
+      float gamma = 0.85 / max(0.04, str);
+      float prob2 = 0.5 * pow(ratio, gamma);
+      ivec2 ms = textureSize(u_matrix, 0);
+      float v = floor(at(u_matrix, ivec2(P.x % ms.x, P.y % ms.y)).r * 255.0 + 0.5);
+      float bn = (v + 0.5) / max(1.0, u_levels);
+      if (best1 < best2) {
+        pick = (bn < prob2) ? best2 : best1;
+      } else {
+        pick = ((1.0 - bn) < prob2) ? best2 : best1;
+      }
+    }
+    fragColor = vec4(palColor(pick), 1.0);
+    return;
+  }
   if (u_mode == 2) {
     ivec2 ms = textureSize(u_matrix, 0);
     float v = floor(at(u_matrix, ivec2(P.x % ms.x, P.y % ms.y)).r * 255.0 + 0.5);
@@ -4756,6 +5088,7 @@ void main() {
         u_distance: 0,
         u_resample: 3,
         u_kuwahara: 0,
+        u_svd: 0,
         u_clahe: 0,
         u_adjust: [0, 0, 0, 1],
         u_hue: 0,
@@ -4776,7 +5109,8 @@ void main() {
       },
       passes: [
         { name: "prep", shader: PREP, float: "full", filter: "nearest", channels: [{ ...nearest2(source), dynamic: false }] },
-        { name: "clahe", shader: CLAHE, float: "full", filter: "nearest", channels: ["prep"] },
+        { name: "svd", shader: SVD, float: "full", filter: "nearest", channels: ["prep"] },
+        { name: "clahe", shader: CLAHE, float: "full", filter: "nearest", channels: ["svd"] },
         { name: "quant", shader: QUANT, filter: "nearest", channels: ["clahe"] },
         { name: "diffuse", shader: DIFFUSE, float: "full", filter: "nearest", pingpong: true, iterations: 2, channels: ["clahe", "diffuse"] },
         { name: "resolve", shader: RESOLVE, filter: "nearest", channels: ["quant", "diffuse"] },
@@ -4845,12 +5179,13 @@ void main() {
         u_distance: plan.distance,
         u_resample: RESAMPLE_ID[s.size.resample] ?? 3,
         u_kuwahara: s.adjust.kuwahara | 0,
+        u_svd: s.adjust.svd || 0,
         u_clahe: s.adjust.clahe || 0,
         u_adjust: [s.adjust.brightness, s.adjust.contrast, s.adjust.saturation, s.adjust.gamma],
         u_hue: s.adjust.hue,
         u_crop: [plan.crop.x, plan.crop.y, plan.crop.w, plan.crop.h],
         u_alphaCut: s.alpha.threshold,
-        u_mode: !plan.quantize ? 0 : plan.kind === "ordered" ? 2 : 1,
+        u_mode: !plan.quantize ? 0 : plan.kind === "posterior" ? 3 : plan.kind === "ordered" ? 2 : 1,
         u_levels: plan.map ? plan.map.levels : 1,
         u_amount: plan.map ? plan.spread * s.dither.strength : 0,
         u_skew: plan.skew,
@@ -5347,113 +5682,146 @@ void main() {
   var PRESETS = [
     {
       id: "hybrid-crisp",
+      category: "Scientific",
       name: "Hybrid Crisp",
-      description: "Bimodal-Plateau edge downsampling + local micro-contrast + OKLab 28 colours + Blue Noise.",
-      settings: { size: { width: 136, resample: "hybrid" }, adjust: { clahe: 0.25 }, palette: { source: "extract", count: 28 }, dither: { method: "bluenoise", strength: 0.45 }, cleanup: { orphans: true } }
+      description: "Bimodal-Plateau edge downsampling + CLAHE micro-contrast + OKLab-BGM 28 colours + Blue Noise.",
+      settings: { size: { width: 136, resample: "hybrid" }, adjust: { clahe: 0.25 }, palette: { source: "extract", count: 28, algo: "oklab-bgm" }, dither: { method: "bluenoise", strength: 0.45 }, cleanup: { orphans: true } }
+    },
+    {
+      id: "bgm-posterior",
+      category: "Scientific",
+      name: "Bayesian Posterior",
+      description: "Regularized OKLab-BGM 20-colour Gaussian EM palette + SVD denoise + 2-nearest Posterior soft dithering.",
+      settings: { size: { width: 140, resample: "hybrid" }, adjust: { svd: 0.35, clahe: 0.22 }, palette: { source: "extract", count: 20, algo: "oklab-bgm" }, dither: { method: "posterior", strength: 0.65 }, cleanup: { orphans: true } }
+    },
+    {
+      id: "svd-cel",
+      category: "Anime & Ink",
+      name: "SVD Cel Painting",
+      description: "SVD structural low-rank denoise + Kuwahara flat brush + OKLab-BGM 18 colours + 1px Comic Ink.",
+      settings: { size: { width: 132, resample: "hybrid" }, adjust: { svd: 0.45, kuwahara: 2, clahe: 0.2 }, palette: { source: "extract", count: 18, algo: "oklab-bgm" }, dither: { method: "none" }, cleanup: { orphans: true, smooth: true }, outline: { mode: "ink", color: "#12101e" } }
     },
     {
       id: "kurzgesagt",
+      category: "Anime & Ink",
       name: "Kurzgesagt Glow",
       description: "GPU Kuwahara flat-paint brush + Kurzgesagt Cosmic 24 + Bioluminescent Bloom FX.",
-      settings: { size: { width: 144, resample: "hybrid" }, adjust: { contrast: 0.1, saturation: 0.18, kuwahara: 3 }, palette: { source: "builtin", id: "kurzgesagt-24" }, dither: { method: "bluenoise", strength: 0.35 }, cleanup: { orphans: true }, fx: { mode: "bloom", strength: 0.55 } }
-    },
-    {
-      id: "crt-arcade",
-      name: "CRT Arcade",
-      description: "1989 Trinitron arcade monitor: Endesga 32 + Bayer 4\xD74 + CRT phosphor grille, scanlines & RGB shift.",
-      settings: { size: { width: 144, resample: "hybrid" }, adjust: { contrast: 0.12, saturation: 0.12, clahe: 0.2 }, palette: { source: "builtin", id: "endesga-32" }, dither: { method: "bayer4", strength: 0.65 }, fx: { mode: "crt", strength: 0.68, scanlines: 0.55, aberration: 0.85 } }
+      settings: { size: { width: 144, resample: "hybrid" }, adjust: { contrast: 0.1, saturation: 0.18, kuwahara: 3 }, palette: { source: "builtin", id: "kurzgesagt-24" }, dither: { method: "posterior", strength: 0.45 }, cleanup: { orphans: true }, fx: { mode: "bloom", strength: 0.55 } }
     },
     {
       id: "chunky-ink",
+      category: "Anime & Ink",
       name: "Chunky Ink",
       description: "Kuwahara flat blocks + Endesga 32 + 1px internal comic ink contour outlines.",
       settings: { size: { width: 124, resample: "hybrid" }, adjust: { kuwahara: 3, clahe: 0.18 }, palette: { source: "builtin", id: "endesga-32" }, dither: { method: "none" }, cleanup: { orphans: true, smooth: true }, outline: { mode: "ink", color: "#141020" } }
     },
     {
+      id: "crt-arcade",
+      category: "Screen FX",
+      name: "CRT Arcade",
+      description: "1989 Trinitron arcade monitor: Endesga 32 + Bayer 4\xD74 + CRT phosphor grille, scanlines & RGB shift.",
+      settings: { size: { width: 144, resample: "hybrid" }, adjust: { contrast: 0.12, saturation: 0.12, clahe: 0.2 }, palette: { source: "builtin", id: "endesga-32" }, dither: { method: "bayer4", strength: 0.65 }, fx: { mode: "crt", strength: 0.68, scanlines: 0.55, aberration: 0.85 } }
+    },
+    {
       id: "pc98-cyber",
+      category: "Retro Hardware",
       name: "PC-98 Cyber",
       description: "Sobel edge-preserving downsampling + NEC PC-98 Cyber 16 + Bayer 4\xD74 + dark ink lines.",
       settings: { size: { width: 160, resample: "sobel" }, adjust: { clahe: 0.2 }, palette: { source: "builtin", id: "pc98-cyber-16" }, dither: { method: "bayer4", strength: 0.65 }, outline: { mode: "ink", color: "#080614" } }
     },
     {
       id: "voxel-3d",
+      category: "Screen FX",
       name: "Voxel 3D",
       description: "Lit 3D micro-voxel bevel shading over Resurrect 64 crisp blocks.",
       settings: { size: { width: 104, resample: "hybrid" }, adjust: { kuwahara: 2, clahe: 0.2 }, palette: { source: "builtin", id: "resurrect-64" }, dither: { method: "none" }, cleanup: { orphans: true }, fx: { mode: "voxel", strength: 0.72 } }
     },
     {
       id: "oscilloscope-xy",
+      category: "Screen FX",
       name: "Oscilloscope",
       description: "Calibrated P31 emerald phosphor vector beam & CRT graticule grid.",
       settings: { size: { width: 176, resample: "sobel" }, adjust: { clahe: 0.35 }, palette: { source: "extract", count: 16 }, dither: { method: "bayer4", strength: 0.4 }, fx: { mode: "oscilloscope", strength: 0.92, scanlines: 0.25 } }
     },
     {
       id: "cyber-blueprint",
+      category: "Screen FX",
       name: "Blueprint",
       description: "Architectural cyan contour wireframe on deep Prussian drafting grid.",
       settings: { size: { width: 176, resample: "sobel" }, adjust: { clahe: 0.3 }, palette: { source: "extract", count: 16 }, dither: { method: "none" }, fx: { mode: "blueprint", strength: 0.92 } }
     },
     {
       id: "aloboi-dream",
+      category: "Screen FX",
       name: "Dreamcore",
       description: "Aloboi Dreamcore 16 pastel synthwave palette + Sierra Lite + soft neon glow.",
       settings: { size: { width: 140, resample: "hybrid" }, palette: { source: "builtin", id: "aloboi-dream-16" }, dither: { method: "sierra-lite", strength: 0.65 }, fx: { mode: "bloom", strength: 0.35 } }
     },
     {
       id: "pico-8",
+      category: "Retro Hardware",
       name: "PICO-8",
       description: "128 px fantasy console look with the 16-colour PICO-8 palette & Blue Noise.",
       settings: { size: { width: 128, resample: "hybrid" }, adjust: { clahe: 0.15 }, palette: { source: "builtin", id: "pico-8" }, dither: { method: "bluenoise", strength: 0.7 } }
     },
     {
       id: "game-boy",
+      category: "Retro Hardware",
       name: "Game Boy LCD",
       description: "DMG-01 four olive greens, 160 px wide, Bayer 4\xD74 + dot-matrix LCD grid.",
       settings: { size: { width: 160, resample: "hybrid" }, adjust: { contrast: 0.15, clahe: 0.2 }, palette: { source: "builtin", id: "game-boy-dmg" }, dither: { method: "bayer4", strength: 1 }, fx: { mode: "lcd", strength: 0.55 } }
     },
     {
       id: "one-bit",
+      category: "Retro Hardware",
       name: "1-Bit Mac",
       description: "Classic Macintosh monochrome: two colours, Atkinson diffusion & crisp local contrast.",
       settings: { size: { width: 192, resample: "hybrid" }, adjust: { contrast: 0.2, clahe: 0.25 }, palette: { source: "builtin", id: "1-bit-monitor" }, dither: { method: "atkinson", strength: 1 } }
     },
     {
       id: "faithful",
+      category: "Scientific",
       name: "Faithful OKLab",
       description: "28 salient OKLab colours extracted from the photo + Floyd\u2013Steinberg diffusion.",
-      settings: { size: { width: 136, resample: "hybrid" }, adjust: { clahe: 0.15 }, palette: { source: "extract", count: 28 }, dither: { method: "floyd-steinberg", strength: 0.75 } }
+      settings: { size: { width: 136, resample: "hybrid" }, adjust: { clahe: 0.15 }, palette: { source: "extract", count: 28, algo: "oklab-salient" }, dither: { method: "floyd-steinberg", strength: 0.75 } }
     },
     {
       id: "balanced",
+      category: "Scientific",
       name: "Balanced",
       description: "Endesga 32, Bayer 4\xD74, Hybrid Bimodal-Plateau edge resampling.",
       settings: { size: { width: 112, resample: "hybrid" }, palette: { source: "builtin", id: "endesga-32" }, dither: { method: "bayer4", strength: 0.6 } }
     },
     {
       id: "sprite",
+      category: "Anime & Ink",
       name: "Clean Sprite",
       description: "No dither, Hybrid edges, orphan cleanup and a dark 1px outer sprite outline.",
       settings: { size: { width: 56, resample: "hybrid" }, palette: { source: "extract", count: 12 }, dither: { method: "none" }, cleanup: { orphans: true }, outline: { mode: "outer", color: "#1a1c2c" } }
     },
     {
       id: "cga",
+      category: "Retro Hardware",
       name: "IBM CGA",
       description: "16 hard hardware colours with an 8\xD78 Bayer pattern.",
       settings: { size: { width: 160, resample: "hybrid" }, palette: { source: "builtin", id: "cga-16" }, dither: { method: "bayer8", strength: 1 } }
     },
     {
       id: "newsprint",
+      category: "Retro Hardware",
       name: "Newsprint",
       description: "Greyscale clustered-dot rotary press halftone.",
       settings: { size: { width: 220, resample: "box" }, palette: { source: "builtin", id: "grayscale-4" }, dither: { method: "cluster8", strength: 1 }, adjust: { saturation: -1, clahe: 0.2 } }
     },
     {
       id: "soft",
+      category: "Scientific",
       name: "Soft Painterly",
-      description: "Resurrect 64 with Sierra Lite diffusion and majority smoothing.",
-      settings: { size: { width: 116, resample: "hybrid" }, palette: { source: "builtin", id: "resurrect-64" }, dither: { method: "sierra-lite", strength: 0.6 }, cleanup: { smooth: true } }
+      description: "Resurrect 64 with Sierra Lite diffusion, SVD smoothing, and majority cleanup.",
+      settings: { size: { width: 116, resample: "hybrid" }, adjust: { svd: 0.25 }, palette: { source: "builtin", id: "resurrect-64" }, dither: { method: "sierra-lite", strength: 0.6 }, cleanup: { smooth: true } }
     }
   ];
+  var PRESET_CATEGORIES = ["Scientific", "Anime & Ink", "Retro Hardware", "Screen FX"];
   var getPreset = (id) => PRESETS.find((p) => p.id === id) || null;
 
   // lib/index.js
@@ -5753,7 +6121,7 @@ void main() {
     return { image, atlas };
   }
   function buildTileset(img, opts = {}) {
-    const tw = Math.max(1, opts.tileWidth || 8), th = Math.max(1, opts.tileHeight || tw);
+    const tw = Math.max(1, opts.tileWidth || opts.tile || 8), th = Math.max(1, opts.tileHeight || tw);
     const mw = Math.ceil(img.width / tw), mh = Math.ceil(img.height / th);
     const tiles = [], keys = /* @__PURE__ */ new Map(), map = [], flipsOut = [];
     const read = (tx, ty) => {

@@ -10,21 +10,26 @@
 
 ## Key Capabilities
 
+- **4-Column PixelForge Workstation (`/editor/`) & Interactive Algorithm Lab (`/playground/`)**:
+  - **5 Live Multi-Viewport Modes**: `Single (1)`, `Vertical/Horizontal Split Curtain (2/C)`, `Dual Sync Side-by-Side (3)`, `4-Up Snapshot/Preset Arena (4)`, and `3×3 Seamless Tile Wrap Checker (5)`.
+  - **7 Non-Destructive Pixel Retouch Tools**: `Navigate/Pan (V)`, `Pixel Pencil 1–4px (B)`, `Procedural-Restore Pixel Eraser (E)`, `Flood Bucket & Shift+Click Global Color Swap (K)`, `1px Bresenham Line (U)`, `1px Pixel Rectangle (R)`, and `Smart Eyedropper (I)`—composited non-destructively over the live WebGL 2 shader output with independent stroke undo/redo.
+  - **Scientific Color & Game-Asset Telemetry**: Floating **12× Pixel Loupe Magnifier (`L`)** with `(X, Y)`, `#HEX`, and perceptual `OKLab` coordinates; live **RGB + Luminance Canvas Histogram**; **4 Style Snapshot Slots (`A/B/C/D`)**; built-in **Procedural OKLab Harmony Ramp Generator**; and a **Live Mirror-Deduplicated Tileset Preview Studio & VRAM Savings Calculator**.
+  - **Interactive WebGL 2 Lab (`/playground/`)**: 4 live browser labs comparing `Bayesian Posterior` vs `64×64 Blue Noise` vs `Bayer 8×8` vs `Atkinson`, `OKLab-BGM` vs `Salient` vs `Median-Cut`, mirror-deduplicated tilemaps, and procedural OKLab color ramps.
 - **Hybrid Bimodal-Plateau Downsampler (`hybrid`)**:
   - Uses smooth alpha-premultiplied box averaging in low-contrast gradients and skies (zero sensor/starfield noise) while splitting high-contrast edges around the tile midpoint into foreground/background plateaus weighted by inverse gradient—snapping typography, thin strokes, and sprite silhouettes cleanly without muddy anti-aliasing halos.
   - Also includes **`sobel`** (gradient-salient pooling), **`box`** (16×16 supersampled average), **`nearest`** (center-texel), and **automatic pixel-grid GCD detection** (`detect_pixel_grid`) to recover exact 1× native art from already-upscaled sprites.
-- **Deterministic Salient OKLab-BGM Palette Discovery (`hybrid_bgm_oklab`)**:
-  - Seeds a tied-covariance **Bayesian Gaussian Mixture** in perceptual **OKLab** space using chroma-weighted **OKLab Median-Cut** centroids—preserving tiny vivid neon highlights while staying 100% deterministic across runs and video frames (zero temporal palette flicker).
-  - Ships with **43+ built-in palettes** (retro hardware, fantasy consoles, Lospec staples, cosmic/cyber palettes), `.gpl` / `.pal` (JASC) / `.hex` / `.txt` / `.json` importers & exporters, and live **`lospec:<slug>`** fetching.
-- **19 Perceptual Dithering Modes**:
-  - **Ordered & Halftone**: **64×64 Void-and-Cluster Blue Noise** (`bluenoise`), `bayer2`, `bayer4`, `bayer8`, `bayer16`, `cluster4` & `cluster8` halftone screens, `lines`, and arbitrary `custom` threshold matrices—all normalized by palette spread.
-  - **7 Serpentine Error-Diffusion Kernels**: `floyd-steinberg`, `atkinson`, `sierra-lite`, `sierra`, `burkes`, `jarvis`, and `stucki` (executed via diagonal wavefront shaders on WebGL 2 and Numba JIT on CPU).
-  - **Bayesian Posterior Dithering**: `bgm_posterior` and `naive` soft-cluster probability dithering.
-- **Kuwahara Cartoon Brush, Local CLAHE Contrast & 1px Comic Ink Outlines**:
-  - Edge-preserving **Kuwahara flat-paint pre-brush** (`0..5`), 5×5 adaptive **CLAHE local micro-contrast** punch, Truncated SVD pre-filtering, CSS luminance-preserving tone controls (Brightness, Contrast, Saturation, Hue rotation, Gamma), orphan stray-pixel removal, stroke-preserving 3×3 majority smoothing, and 1px outlines (**`outer`**, **`inner`**, and internal **`ink`** comic contours across opaque scenes).
-- **Real-Time 60-FPS WebGL 2 Screen Post-FX, 18 Studio Presets & 12 Procedural Styles**:
-  - Live WebGL 2 + CPU-parity **Screen & Stylization Post-FX** stage (`fx.mode`): **Bioluminescent Bloom**, **CRT Arcade Phosphor** (RGB triad grille + scanlines + vignette), **3D Voxel Bevel**, **Handheld Dot-Matrix LCD**, **Oscilloscope P31 Vector Beam**, and **Cyber Blueprint Wireframe**, plus continuous **CRT Scanlines** and **RGB Chromatic Aberration** (`0..3 px`).
-  - Ships with **18 instant Studio Quick-Look presets** (`hybrid-crisp`, `kurzgesagt`, `crt-arcade`, `chunky-ink`, `pc98-cyber`, `voxel-3d`, `oscilloscope-xy`, `cyber-blueprint`, `aloboi-dream`, `pico-8`, `game-boy`, `one-bit`, `faithful`, `balanced`, `sprite`, `cga`, `newsprint`, `soft`), 4 bundled real scenic view photographs, a live stage active-palette HUD, and 12 Python procedural video/reel styles.
+- **Regularized OKLab-BGM Palette Discovery (`oklab-bgm` / `hybrid_bgm_oklab`) & Harmony Synthesis**:
+  - Runs 7 regularized **Bayesian Gaussian Mixture EM** iterations in perceptual **OKLab** space (fitting anisotropic diagonal covariances + Dirichlet mixture priors) seeded by chroma- and edge-weighted **k-means++ / Median-Cut**—preserving tiny vivid neon highlights across WebGL 2 and Python with zero temporal flicker.
+  - Includes **`generateHarmonyRamp`** for procedural cool-shadow / warm-highlight pixel-art color ramps, **43+ built-in palettes**, `.gpl` / `.pal` / `.hex` / `.txt` / `.json` I/O, and live **`lospec:<slug>`** fetching.
+- **20 Perceptual Dithering Modes (WebGL 2 + CPU Parity)**:
+  - **WebGL 2 & CPU Bayesian Posterior Soft Dither (`posterior` / `bgm_posterior`)**: Evaluates exact perceptual distances `(d₁, d₂)` to the 2 nearest OKLab centroids and thresholds Boltzmann posterior probability `P(c₁)` over a 64×64 void-and-cluster Blue Noise field—guaranteeing zero 3rd-color bleed and seam-free Voronoi transitions.
+  - **Ordered & Halftone**: **64×64 Void-and-Cluster Blue Noise** (`bluenoise`), `bayer2`, `bayer4`, `bayer8`, `bayer16`, `cluster4` & `cluster8` halftone screens, `lines`, and arbitrary `custom` threshold matrices.
+  - **7 Serpentine Error-Diffusion Kernels**: `floyd-steinberg`, `atkinson`, `sierra-lite`, `sierra`, `burkes`, `jarvis`, and `stucki`.
+- **SVD Low-Rank Denoise, Kuwahara Brush, Local CLAHE Contrast & 1px Comic Ink**:
+  - Dedicated **SVD / Low-Rank Structural Noise Pre-Filter** (`adjust.svd`: `0..1`), edge-preserving **Kuwahara flat-paint pre-brush** (`0..4`), 5×5 adaptive **CLAHE local micro-contrast** punch, luminance-preserving tone controls, orphan stray-pixel removal, stroke-preserving 3×3 majority smoothing, and 1px outlines (**`outer`**, **`inner`**, and internal **`ink`** comic contours).
+- **Real-Time 60-FPS WebGL 2 Screen Post-FX, 20 Categorized Studio Presets & 12 Procedural Styles**:
+  - Live WebGL 2 + CPU-parity **Screen & Stylization Post-FX** stage (`fx.mode`): **Bioluminescent Bloom**, **CRT Arcade Phosphor**, **3D Voxel Bevel**, **Handheld Dot-Matrix LCD**, **Oscilloscope P31 Vector Beam**, and **Cyber Blueprint Wireframe**, plus continuous **CRT Scanlines** and **RGB Chromatic Aberration** (`0..3 px`).
+  - Ships with **20 categorized Studio presets** (`bgm-posterior`, `svd-cel`, `hybrid-crisp`, `kurzgesagt`, `crt-arcade`, `chunky-ink`, `pc98-cyber`, `voxel-3d`, `oscilloscope-xy`, `cyber-blueprint`, `aloboi-dream`, `pico-8`, `game-boy`, `one-bit`, `faithful`, `balanced`, `sprite`, `cga`, `newsprint`, `soft`), 4 bundled real scenic view photographs, and 12 Python procedural video/reel styles.
 - **Game-Ready Asset & Video Exporters**:
   - **True 1/2/4/8-bit Indexed-Color PNG (`PLTE` + `tRNS`)** (~53% smaller files), 1px pixel-grid overlays, **Sprite Sheet Packer + TexturePacker/Aseprite JSON Atlas**, **Mirror-Deduplicated (`X/Y/XY` flip) Tileset & Tilemap Builder**, animated GIF, WebM, and H.264 MP4 (with audio pass-through or external `.wav` soundtrack muxing).
 - **Computer-Vision Video Event & Motion Detectors**:

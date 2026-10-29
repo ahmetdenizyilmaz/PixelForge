@@ -1,4 +1,4 @@
-// Screenshot the built site in a headless browser (dark and light) and fail on console errors.
+﻿// Screenshot the built site in a headless browser (dark and light) and fail on console errors.
 //   npm run build:site && npm run screenshots
 // Needs Playwright: `npm i -D playwright && npx playwright install chromium`
 // (or set PLAYWRIGHT_MODULE to an existing install). Output: _screenshots/
@@ -42,7 +42,7 @@ const problems = [];
 
 async function shot(name, path, { theme = 'dark', width = 1440, height = 900, prepare } = {}) {
   const ctx = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 1, colorScheme: theme });
-  await ctx.addInitScript(t => { try { localStorage.setItem('itp:theme', JSON.stringify(t)); } catch { /* */ } }, theme);
+  await ctx.addInitScript(t => { try { localStorage.setItem('pf:theme', JSON.stringify(t)); } catch { /* */ } }, theme);
   const page = await ctx.newPage();
   page.on('console', m => { if (m.type() === 'error' && !/favicon|GPU stall|GL Driver/.test(m.text())) problems.push(`${name}: ${m.text()}`); });
   page.on('pageerror', e => problems.push(`${name}: ${e.message}`));
@@ -54,11 +54,11 @@ async function shot(name, path, { theme = 'dark', width = 1440, height = 900, pr
 }
 
 const editorReady = async (page, sample) => {
-  await page.waitForFunction(() => window.itpEditor, null, { timeout: 30000 });
+  await page.waitForFunction(() => window.pfStudio, null, { timeout: 30000 });
   if (sample) {
-    await page.evaluate(s => window.itpEditor.openSample(s), sample);
-    await page.waitForFunction(() => window.itpEditor.result, null, { timeout: 30000 });
-    await page.evaluate(() => window.itpEditor.idle());
+    await page.evaluate(s => window.pfStudio.openSample(s), sample);
+    await page.waitForFunction(() => window.pfStudio.result, null, { timeout: 30000 });
+    await page.evaluate(() => window.pfStudio.idle());
   }
 };
 
@@ -70,15 +70,15 @@ for (const theme of ['dark', 'light']) {
     theme, prepare: async p => {
       await editorReady(p, 'still-life');
       await p.keyboard.press('c');
-      await p.evaluate(() => window.itpEditor.store.update({ dither: { method: 'floyd-steinberg' }, palette: { source: 'builtin', id: 'resurrect-64' } }));
-      await p.evaluate(() => window.itpEditor.idle());
+      await p.evaluate(() => window.pfStudio.store.update({ dither: { method: 'floyd-steinberg' }, palette: { source: 'builtin', id: 'resurrect-64' } }));
+      await p.evaluate(() => window.pfStudio.idle());
     },
   });
   await shot('editor-sprite', 'editor/', {
     theme, prepare: async p => {
       await editorReady(p, 'potion');
-      await p.evaluate(() => window.itpEditor.applyPreset('sprite'));
-      await p.evaluate(() => window.itpEditor.idle());
+      await p.evaluate(() => window.pfStudio.applyPreset('sprite'));
+      await p.evaluate(() => window.pfStudio.idle());
       await p.click('text=Cleanup & outline');
     },
   });
@@ -90,15 +90,15 @@ for (const theme of ['dark', 'light']) {
     },
   });
   await shot('editor-export', 'editor/', { theme, prepare: async p => { await editorReady(p, 'dusk'); await p.click('#itp-tab-export'); } });
-  await shot('docs', 'docs/library/', { theme });
-  await shot('examples', 'examples/', { theme, prepare: p => p.waitForTimeout(1500) });
+  await shot('docs', 'docs/javascript-sdk/', { theme });
+  await shot('examples', 'playground/', { theme, prepare: p => p.waitForTimeout(1500) });
 }
 await shot('editor-tablet', 'editor/', { width: 820, height: 1180, prepare: p => editorReady(p, 'dusk') });
 await shot('editor-phone', 'editor/', { width: 390, height: 844, prepare: p => editorReady(p, 'dusk') });
 await shot('landing-phone', '', { width: 390, height: 844, theme: 'light' });
 await shot('example-basic', 'examples/basic/', { prepare: p => p.waitForFunction(() => document.getElementById('info')?.textContent) });
 
-// ---- end-to-end flows in the editor: batch ZIP, PNG, tileset, video (made in the page with our own encoder) → GIF and WebM
+// ---- end-to-end flows in the editor: batch ZIP, PNG, tileset, video (made in the page with our own encoder) â†’ GIF and WebM
 {
   const ctx = await browser.newContext({ acceptDownloads: true, viewport: { width: 1440, height: 900 } });
   const page = await ctx.newPage();
@@ -113,21 +113,21 @@ await shot('example-basic', 'examples/basic/', { prepare: p => p.waitForFunction
     return { name: d.suggestedFilename(), size: statSync(path).size };
   };
   const got = [];
-  got.push(await download(() => window.itpEditor.app.exportPNG()));
-  got.push(await download(() => window.itpEditor.app.exportTileset({ tile: 16, flips: true })));
-  await page.evaluate(async () => { await window.itpEditor.openSample('still-life'); await window.itpEditor.openSample('potion'); });
+  got.push(await download(() => window.pfStudio.app.exportPNG()));
+  got.push(await download(() => window.pfStudio.app.exportTileset({ tile: 16, flips: true })));
+  await page.evaluate(async () => { await window.pfStudio.openSample('still-life'); await window.pfStudio.openSample('potion'); });
   // per-file settings: the potion gets its own look, the others keep the shared one
   const perFile = await page.evaluate(async () => {
-    const { app, store } = window.itpEditor;
+    const { app, store } = window.pfStudio;
     app.setOwn(app.current, true);
     store.update({ dither: { method: 'atkinson' }, frame: { aspect: '1:1' } });
-    await window.itpEditor.idle();
+    await window.pfStudio.idle();
     return app.items.map(i => `${app.settingsFor(i).dither.method}/${app.settingsFor(i).frame.aspect}${i.own ? '*' : ''}`).join(' ');
   });
   if (perFile !== 'bayer4/original bayer4/original atkinson/1:1*') problems.push(`flows: per-file settings wrong: ${perFile}`);
-  got.push(await download(() => window.itpEditor.app.exportZip()));
-  got.push(await download(() => window.itpEditor.app.exportAnimation({ source: 'files', format: 'gif', fps: 4, start: 0, end: 0 })));
-  got.push(await download(() => window.itpEditor.app.exportSheet({ source: 'files', format: 'gif', fps: 4, columns: 0, padding: 1 })));
+  got.push(await download(() => window.pfStudio.app.exportZip()));
+  got.push(await download(() => window.pfStudio.app.exportAnimation({ source: 'files', format: 'gif', fps: 4, start: 0, end: 0 })));
+  got.push(await download(() => window.pfStudio.app.exportSheet({ source: 'files', format: 'gif', fps: 4, columns: 0, padding: 1 })));
   // make a short WebM in the page, open it as a video, export it
   const madeVideo = await page.evaluate(async () => {
     const { createVideoEncoder, videoSupport } = await import('../lib/video.esm.js');
@@ -140,22 +140,22 @@ await shot('example-basic', 'examples/basic/', { prepare: p => p.waitForFunction
       await enc.add({ width: 160, height: 120, data });
     }
     const blob = await enc.finish();
-    await window.itpEditor.addFiles([new File([blob], 'clip.webm', { type: 'video/webm' })]);
-    await window.itpEditor.idle();
+    await window.pfStudio.addFiles([new File([blob], 'clip.webm', { type: 'video/webm' })]);
+    await window.pfStudio.idle();
     return true;
   });
   if (madeVideo) {
-    await page.waitForFunction(() => window.itpEditor.app.current?.type === 'video' && window.itpEditor.result, null, { timeout: 30000 });
+    await page.waitForFunction(() => window.pfStudio.app.current?.type === 'video' && window.pfStudio.result, null, { timeout: 30000 });
     await page.keyboard.press('.'); await page.keyboard.press('.');
     await page.waitForTimeout(300);
     await page.screenshot({ path: join(SHOTS, 'editor-video-dark.png') });
-    got.push(await download(() => window.itpEditor.app.exportAnimation({ source: 'video', format: 'gif', fps: 10, start: 0, end: 2 })));
-    got.push(await download(() => window.itpEditor.app.exportAnimation({ source: 'video', format: 'webm', fps: 10, start: 0, end: 2 })));
+    got.push(await download(() => window.pfStudio.app.exportAnimation({ source: 'video', format: 'gif', fps: 10, start: 0, end: 2 })));
+    got.push(await download(() => window.pfStudio.app.exportAnimation({ source: 'video', format: 'webm', fps: 10, start: 0, end: 2 })));
     // MP4 needs an H.264 encoder, which open-source Chromium builds may not have
     if (await page.evaluate(async () => (await (await import('../lib/video.esm.js')).videoSupport(160, 120)).mp4)) {
-      got.push(await download(() => window.itpEditor.app.exportAnimation({ source: 'video', format: 'mp4', fps: 10, start: 0, end: 2 })));
+      got.push(await download(() => window.pfStudio.app.exportAnimation({ source: 'video', format: 'mp4', fps: 10, start: 0, end: 2 })));
     } else console.log('MP4 export skipped: this browser has no H.264 encoder');
-    got.push(await download(() => window.itpEditor.app.exportAnimation({ source: 'video', format: 'png-seq', fps: 5, start: 0, end: 1 })));
+    got.push(await download(() => window.pfStudio.app.exportAnimation({ source: 'video', format: 'png-seq', fps: 5, start: 0, end: 1 })));
   } else problems.push('flows: this browser cannot encode WebM, video flow skipped');
   for (const g of got) if (!g.size) problems.push(`flows: empty download ${g.name}`);
   console.log('downloads: ' + got.map(g => `${g.name} (${(g.size / 1024).toFixed(1)} KB)`).join(', '));
@@ -167,7 +167,7 @@ await shot('example-basic', 'examples/basic/', { prepare: p => p.waitForFunction
   const ctx = await browser.newContext();
   const page = await ctx.newPage();
   page.on('pageerror', e => problems.push(`parity: ${e.message}`));
-  await page.goto(origin + 'examples/', { waitUntil: 'networkidle' });
+  await page.goto(origin + 'playground/', { waitUntil: 'networkidle' });
   const rows = await page.evaluate(async () => {
     const I = await import('../lib/pixelforge.bundle.esm.js');
     const w = 173, h = 131, data = new Uint8ClampedArray(w * h * 4);
@@ -203,9 +203,9 @@ await shot('example-basic', 'examples/basic/', { prepare: p => p.waitForFunction
     return out;
   });
   for (const r of rows) {
-    // palette 'none' keeps raw colours: ±1 rounding on exact .5 averages is allowed
+    // palette 'none' keeps raw colours: Â±1 rounding on exact .5 averages is allowed
     const ok = r.backend === 'webgl' && (r.quantize ? r.diffPct <= (r.kind === 'diffusion' ? 0.5 : 0) : r.maxDelta <= 1);
-    if (!ok) problems.push(`GPU/CPU mismatch: ${r.settings} → ${r.diffPct.toFixed(3)}% pixels differ (max Δ ${r.maxDelta}, backend ${r.backend})`);
+    if (!ok) problems.push(`GPU/CPU mismatch: ${r.settings} â†’ ${r.diffPct.toFixed(3)}% pixels differ (max Î” ${r.maxDelta}, backend ${r.backend})`);
   }
   console.log(`GPU/CPU parity: ${rows.filter(r => r.diffPct === 0).length}/${rows.length} identical, the rest within tolerance`);
   await ctx.close();
@@ -215,3 +215,4 @@ await browser.close();
 server.close();
 if (problems.length) { console.error('Console errors:\n' + problems.join('\n')); process.exit(1); }
 console.log(`screenshots written to _screenshots/`);
+
