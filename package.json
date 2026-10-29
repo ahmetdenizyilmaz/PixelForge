@@ -1,0 +1,94 @@
+{
+  "name": "pixelforge",
+  "version": "1.0.0",
+  "description": "PixelForge: Hybrid Edge-Aware Pixel Art, WebGL 2 Real-Time Studio, 32-Thread Numba Python Core & 15-Tool MCP Engine.",
+  "type": "module",
+  "license": "MIT",
+  "author": "Ahmet Deniz Yilmaz",
+  "homepage": "https://github.com/ahmetdenizyilmaz/PixelForge",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ahmetdenizyilmaz/PixelForge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ahmetdenizyilmaz/PixelForge/issues"
+  },
+  "keywords": [
+    "pixelforge",
+    "pixel-art",
+    "dithering",
+    "oklab",
+    "kuwahara",
+    "sobel",
+    "palette",
+    "quantization",
+    "floyd-steinberg",
+    "bluenoise",
+    "webgl2",
+    "numba",
+    "mcp",
+    "sprite-sheet",
+    "tileset",
+    "lospec"
+  ],
+  "main": "./dist/pixelforge.cjs",
+  "module": "./dist/pixelforge.esm.js",
+  "types": "./types/index.d.ts",
+  "unpkg": "./dist/pixelforge.min.js",
+  "jsdelivr": "./dist/pixelforge.min.js",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "import": "./dist/pixelforge.esm.js",
+      "require": "./dist/pixelforge.cjs",
+      "default": "./dist/pixelforge.esm.js"
+    },
+    "./video": {
+      "types": "./types/video.d.ts",
+      "import": "./dist/video.esm.js",
+      "default": "./dist/video.esm.js"
+    },
+    "./editor": {
+      "types": "./types/editor.d.ts",
+      "import": "./dist/editor.esm.js",
+      "default": "./dist/editor.esm.js"
+    },
+    "./editor.css": "./dist/editor.css",
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
+  },
+  "sideEffects": [
+    "./dist/editor.css",
+    "./dist/pixelforge.js",
+    "./dist/pixelforge.min.js"
+  ],
+  "files": [
+    "dist",
+    "lib",
+    "pixelforge",
+    "types",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "build:site": "npm run build && node scripts/build-site.mjs",
+    "watch": "node esbuild.config.mjs --watch",
+    "dev": "node scripts/serve.mjs --dev",
+    "preview": "node scripts/serve.mjs",
+    "bluenoise": "node scripts/gen-bluenoise.mjs",
+    "clean": "node scripts/clean.mjs",
+    "test": "npm run build:site && node --test"
+  },
+  "dependencies": {
+    "shadermate": "^2.0.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.12",
+    "highlight.js": "^11.12.0",
+    "marked": "^15.0.12"
+  }
+}
